@@ -6,6 +6,9 @@ import ErrorBoundary from './components/ErrorBoundary'
 import { ThemeProvider } from './components/ThemeProvider'
 import './i18n'
 import './index.css'
+import { installBrowserApiShim } from './lib/browserApi'
+
+installBrowserApiShim()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
