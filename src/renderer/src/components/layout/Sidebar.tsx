@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { isBrowserHeadlessMode } from '@/lib/runtimeMode'
 
 interface NavItem {
   titleKey: string
@@ -65,6 +66,7 @@ export function Sidebar() {
   const navigate = useNavigate()
   const location = useLocation()
   const [pendingHref, setPendingHref] = useState<string | null>(null)
+  const browserMode = isBrowserHeadlessMode()
 
   const hasBlockers = blockers.length > 0
 
@@ -144,7 +146,7 @@ export function Sidebar() {
         )}
       >
         <nav className="flex-1 p-3 space-y-1 overflow-x-hidden overflow-y-auto pt-5">
-          {navItems.map((item) => (
+          {navItems.filter((item) => !browserMode || ['/', '/providers', '/settings'].includes(item.href)).map((item) => (
             <NavButton key={item.href} item={item} />
           ))}
         </nav>

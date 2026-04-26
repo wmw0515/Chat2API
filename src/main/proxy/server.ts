@@ -12,6 +12,12 @@ import managementRoutes from './routes/management'
 import { proxyStatusManager } from './status'
 import { storeManager } from '../store/store'
 import { sessionManager } from './sessionManager'
+import ProviderManager from '../store/providers'
+import AccountManager from '../store/accounts'
+import ConfigManager from '../store/config'
+import fs from 'node:fs'
+import path from 'node:path'
+import mime from 'mime-types'
 
 /**
  * Proxy Server Class
@@ -190,6 +196,76 @@ export class ProxyServer {
       ctx.body = statistics
     })
 
+    this.router.get('/dashboard-api/health', async (ctx) => {
+      const status = proxyStatusManager.getRunningStatus()
+      const statistics = proxyStatusManager.getStatistics()
+
+      ctx.body = {
+        status: status.isRunning ? 'running' : 'stopped',
+        uptime: status.uptime,
+        statistics,
+      }
+    })
+
+    this.router.get('/dashboard-api/config', async (ctx) => {
+      ctx.body = ConfigManager.get()
+    })
+
+    this.router.put('/dashboard-api/config', async (ctx) => {
+      const updates = (ctx.request.body || {}) as Record<string, unknown>
+      const validation = ConfigManager.validate(updates)
+
+      if (!validation.valid) {
+        ctx.status = 400
+        ctx.body = {
+          success: false,
+          error: validation.errors.join('; '),
+        }
+        return
+      }
+
+      ctx.body = {
+        success: true,
+        data: ConfigManager.update(updates),
+      }
+    })
+
+    this.router.get('/dashboard-api/providers', async (ctx) => {
+      ctx.body = ProviderManager.getAll()
+    })
+
+    this.router.get('/dashboard-api/providers/builtin', async (ctx) => {
+      ctx.body = ProviderManager.getBuiltin()
+    })
+
+    this.router.get('/dashboard-api/accounts', async (ctx) => {
+      ctx.body = AccountManager.getAll(false)
+    })
+
+    this.router.get('/dashboard-api/statistics', async (ctx) => {
+      ctx.body = storeManager.getStatistics()
+    })
+
+    this.router.get('/dashboard-api/logs', async (ctx) => {
+      const limit = Number.parseInt(String(ctx.query.limit || '50'), 10)
+      ctx.body = storeManager.getLogs(Number.isFinite(limit) ? limit : 50)
+    })
+
+    this.router.get('/dashboard-api/logs/trend', async (ctx) => {
+      const days = Number.parseInt(String(ctx.query.days || '7'), 10)
+      ctx.body = storeManager.getLogTrend(Number.isFinite(days) ? days : 7)
+    })
+
+    this.router.get('/dashboard-api/request-logs', async (ctx) => {
+      const limit = Number.parseInt(String(ctx.query.limit || '100'), 10)
+      ctx.body = storeManager.getRequestLogs(Number.isFinite(limit) ? limit : 100)
+    })
+
+    this.router.get('/dashboard-api/request-logs/trend', async (ctx) => {
+      const days = Number.parseInt(String(ctx.query.days || '7'), 10)
+      ctx.body = storeManager.getRequestLogTrend(Number.isFinite(days) ? days : 7)
+    })
+
     // Management API enable check middleware
     // This must be registered before management routes
     const managementEnableCheck = async (ctx: Context, next: Next) => {
@@ -235,6 +311,43 @@ export class ProxyServer {
     this.app.use(this.router.routes())
     this.app.use(this.router.allowedMethods())
 
+    this.app.use(async (ctx, next) => {
+      if (ctx.method !== 'GET') {
+        await next()
+        return
+      }
+
+      const rendererRoot = this.resolveRendererRoot()
+      if (!rendererRoot || ctx.path.startsWith('/v0/') || ctx.path.startsWith('/v1/') || ctx.path.startsWith('/dashboard-api/')) {
+        await next()
+        return
+      }
+
+      const requestPath = ctx.path === '/' ? '/index.html' : ctx.path
+      const filePath = path.join(rendererRoot, requestPath)
+      const normalizedPath = path.normalize(filePath)
+      if (!normalizedPath.startsWith(rendererRoot)) {
+        ctx.status = 403
+        return
+      }
+
+      const hasExtension = path.extname(requestPath).length > 0
+      const targetFile = fs.existsSync(normalizedPath)
+        ? normalizedPath
+        : hasExtension
+          ? ''
+          : path.join(rendererRoot, 'index.html')
+
+      if (!targetFile || !fs.existsSync(targetFile)) {
+        await next()
+        return
+      }
+
+      const contentType = mime.lookup(targetFile) || 'application/octet-stream'
+      ctx.type = contentType
+      ctx.body = fs.createReadStream(targetFile)
+    })
+
     this.app.use(async (ctx) => {
       ctx.status = 404
       ctx.body = {
@@ -244,6 +357,22 @@ export class ProxyServer {
         },
       }
     })
+  }
+
+  private resolveRendererRoot(): string | null {
+    const candidates = [
+      path.resolve(__dirname, '../renderer'),
+      path.resolve(process.cwd(), 'out/renderer'),
+      path.resolve(process.cwd(), 'src/renderer/dist'),
+    ]
+
+    for (const candidate of candidates) {
+      if (fs.existsSync(path.join(candidate, 'index.html'))) {
+        return candidate
+      }
+    }
+
+    return null
   }
 
   /**

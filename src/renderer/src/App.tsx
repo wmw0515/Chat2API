@@ -4,6 +4,7 @@ import { MainLayout } from '@/components/layout/MainLayout'
 import { TrayView } from '@/components/Tray/TrayView'
 import { Toaster } from '@/components/ui/toaster'
 import { Skeleton } from '@/components/ui/skeleton'
+import { isBrowserHeadlessMode } from '@/lib/runtimeMode'
 
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })))
 const Providers = lazy(() => import('@/pages/Providers').then(m => ({ default: m.Providers })))
@@ -29,6 +30,8 @@ function PageLoader() {
 }
 
 function App() {
+  const browserMode = isBrowserHeadlessMode()
+
   return (
     <>
       <Routes>
@@ -36,13 +39,17 @@ function App() {
         <Route element={<MainLayout />}>
           <Route path="/" element={<Suspense fallback={<PageLoader />}><Dashboard /></Suspense>} />
           <Route path="/providers" element={<Suspense fallback={<PageLoader />}><Providers /></Suspense>} />
-          <Route path="/proxy" element={<Suspense fallback={<PageLoader />}><ProxySettings /></Suspense>} />
-          <Route path="/models" element={<Suspense fallback={<PageLoader />}><Models /></Suspense>} />
-          <Route path="/api-keys" element={<Suspense fallback={<PageLoader />}><ApiKeys /></Suspense>} />
-          <Route path="/logs" element={<Suspense fallback={<PageLoader />}><Logs /></Suspense>} />
-          <Route path="/session" element={<Suspense fallback={<PageLoader />}><SessionManagement /></Suspense>} />
           <Route path="/settings" element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
-          <Route path="/about" element={<Suspense fallback={<PageLoader />}><About /></Suspense>} />
+          {!browserMode && (
+            <>
+              <Route path="/proxy" element={<Suspense fallback={<PageLoader />}><ProxySettings /></Suspense>} />
+              <Route path="/models" element={<Suspense fallback={<PageLoader />}><Models /></Suspense>} />
+              <Route path="/api-keys" element={<Suspense fallback={<PageLoader />}><ApiKeys /></Suspense>} />
+              <Route path="/logs" element={<Suspense fallback={<PageLoader />}><Logs /></Suspense>} />
+              <Route path="/session" element={<Suspense fallback={<PageLoader />}><SessionManagement /></Suspense>} />
+              <Route path="/about" element={<Suspense fallback={<PageLoader />}><About /></Suspense>} />
+            </>
+          )}
         </Route>
       </Routes>
       <Toaster />

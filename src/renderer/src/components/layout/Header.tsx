@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import logoIcon from '@/assets/icons/icons.png'
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { isBrowserHeadlessMode } from '@/lib/runtimeMode'
 
 export function Header() {
   const { t } = useTranslation()
@@ -13,6 +14,7 @@ export function Header() {
   const [proxyEnabled, setProxyEnabled] = useState(false)
   const [proxyLoading, setProxyLoading] = useState(false)
   const [port, setPort] = useState(8080)
+  const browserMode = isBrowserHeadlessMode()
 
   useEffect(() => {
     if (!window.electronAPI?.proxy?.onStatusChanged) return
@@ -120,7 +122,7 @@ export function Header() {
             </span>
             <button
               onClick={handleToggleProxy}
-              disabled={proxyLoading}
+              disabled={proxyLoading || browserMode}
               className={cn(
                 "w-6 h-6 flex items-center justify-center rounded-full transition-all duration-200",
                 "disabled:opacity-50 disabled:cursor-not-allowed",
@@ -130,7 +132,9 @@ export function Header() {
               )}
               title={proxyEnabled ? t('proxyStatus.stop') : t('proxyStatus.start')}
             >
-              {proxyLoading ? (
+              {browserMode ? (
+                <span className="text-[10px]">web</span>
+              ) : proxyLoading ? (
                 <span className="text-[10px]">...</span>
               ) : proxyEnabled ? (
                 <Pause className="h-3 w-3" />

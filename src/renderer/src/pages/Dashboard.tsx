@@ -13,6 +13,7 @@ import {
 import { useDashboardStore } from '@/stores/dashboardStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { cn } from '@/lib/utils'
+import { isBrowserHeadlessMode } from '@/lib/runtimeMode'
 
 export function Dashboard() {
   const { t } = useTranslation()
@@ -96,7 +97,7 @@ export function Dashboard() {
     navigate('/logs?tab=request&highlight=' + item.id)
   }, [navigate])
 
-  const isElectron = !!window.electronAPI
+  const isElectron = !isBrowserHeadlessMode()
 
   return (
     <div className="space-y-6">
