@@ -15,6 +15,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
+    "start:headless": "node out/main/headless.js",
     "start:sandbox": "electron . --no-sandbox",
     "postinstall": "electron-builder install-app-deps",
     "prebuild:check": "node scripts/prebuild-check.js",

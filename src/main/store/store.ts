@@ -1,10 +1,9 @@
 /**
  * Credential Storage Module - Core Storage Implementation
  * Uses electron-store for persistent storage
- * Uses Electron's safeStorage API for sensitive data encryption
+ * Uses Electron's safeStorage API for sensitive data encryption when available
  */
 
-import { app, safeStorage, BrowserWindow } from 'electron'
 import { homedir } from 'os'
 import { join } from 'path'
 import {
@@ -41,6 +40,30 @@ let Store: any = null
  * Storage Instance Type Definition
  */
 type StoreType = any
+type BrowserWindowLike = { webContents?: { send: (channel: string, payload: unknown) => void } }
+type SafeStorageLike = {
+  isEncryptionAvailable: () => boolean
+  encryptString: (plaintext: string) => Buffer
+  decryptString: (ciphertext: Buffer) => string
+}
+
+let cachedSafeStorage: SafeStorageLike | null = null
+
+async function loadSafeStorage(): Promise<SafeStorageLike | null> {
+  if (cachedSafeStorage) return cachedSafeStorage
+  if (!process.versions.electron) return null
+
+  try {
+    const electronModule = await import('electron')
+    if (electronModule.safeStorage?.isEncryptionAvailable) {
+      cachedSafeStorage = electronModule.safeStorage as SafeStorageLike
+    }
+  } catch {
+    cachedSafeStorage = null
+  }
+
+  return cachedSafeStorage
+}
 
 /**
  * Storage Manager Class
@@ -49,10 +72,10 @@ type StoreType = any
 class StoreManager {
   private store: StoreType | null = null
   private isInitialized: boolean = false
-  private mainWindow: BrowserWindow | null = null
+  private mainWindow: BrowserWindowLike | null = null
   private initializationError: Error | null = null
 
-  setMainWindow(window: BrowserWindow | null): void {
+  setMainWindow(window: BrowserWindowLike | null): void {
     this.mainWindow = window
   }
 
@@ -92,7 +115,7 @@ class StoreManager {
         name: 'data',
         cwd: storagePath,
         defaults: this.getDefaultData(),
-        encryptionKey: this.getEncryptionKey(),
+        encryptionKey: await this.getEncryptionKey(),
       })
 
       await this.initializeDefaultProviders()
@@ -109,7 +132,7 @@ class StoreManager {
           name: 'data',
           cwd: storagePath,
           defaults: this.getDefaultData(),
-          encryptionKey: this.getEncryptionKey(),
+          encryptionKey: await this.getEncryptionKey(),
         })
         this.isInitialized = true
         this.initializationError = null
@@ -158,9 +181,10 @@ class StoreManager {
    * Note: electron-store uses this key to encrypt/decrypt the data file,
    * so it must be stable across app restarts
    */
-  private getEncryptionKey(): string | undefined {
+  private async getEncryptionKey(): Promise<string | undefined> {
     try {
-      if (safeStorage.isEncryptionAvailable()) {
+      const safeStorage = await loadSafeStorage()
+      if (safeStorage?.isEncryptionAvailable()) {
         // Use a fixed key - electron-store will use this to encrypt/decrypt data
         // The key itself is not stored in the data file, only used for encryption
         return 'chat2api-fixed-encryption-key-v1'
@@ -283,18 +307,11 @@ class StoreManager {
    */
   encryptData(data: string): string {
     try {
-      console.log('[Store] encryptData input length:', data.length, 'content:', data.substring(0, 20) + '...')
-      if (safeStorage.isEncryptionAvailable()) {
+      if (cachedSafeStorage?.isEncryptionAvailable()) {
         // Create new Buffer to store encryption result
-        const encrypted = Buffer.from(safeStorage.encryptString(data))
+        const encrypted = Buffer.from(cachedSafeStorage.encryptString(data))
         const result = encrypted.toString('base64')
-        console.log('[Store] encryptData output length:', result.length, 'content:', result.substring(0, 20) + '...')
-        // Verify encryption is correct
-        const decrypted = safeStorage.decryptString(encrypted)
-        console.log('[Store] encryptData verify decryption:', decrypted.substring(0, 20) + '...', 'match:', decrypted === data)
         return result
-      } else {
-        console.log('[Store] Encryption unavailable, returning original data')
       }
     } catch (error) {
       console.error('Failed to encrypt data:', error)
@@ -309,9 +326,9 @@ class StoreManager {
    */
   decryptData(encryptedData: string): string {
     try {
-      if (safeStorage.isEncryptionAvailable()) {
+      if (cachedSafeStorage?.isEncryptionAvailable()) {
         const buffer = Buffer.from(encryptedData, 'base64')
-        return safeStorage.decryptString(buffer)
+        return cachedSafeStorage.decryptString(buffer)
       }
     } catch (error) {
       console.error('Failed to decrypt data:', error)

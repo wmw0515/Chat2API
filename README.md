@@ -163,6 +163,26 @@ For security, you can enable API Key authentication:
 3. Enter a name and description
 4. Copy the generated key
 
+## 🧪 Headless Server Mode (Phase 1)
+
+You can now run the OpenAI-compatible proxy without launching Electron UI/tray:
+
+```bash
+npm install
+npm run build
+npm run start:headless
+```
+
+Optional overrides:
+
+```bash
+CHAT2API_HOST=0.0.0.0 CHAT2API_PORT=8080 npm run start:headless
+```
+
+Notes:
+- This is backend-only mode (no dashboard migration yet).
+- See `docs/headless-phase1.md` for architecture notes and limitations.
+
 ## 📸 Screenshots
 
 | Dashboard | Providers |
@@ -267,4 +287,3 @@ This means:
 - [Tailwind CSS](https://tailwindcss.com/) - CSS framework
 - [Zustand](https://zustand-demo.pmnd.rs/) - State management
 - [Koa](https://koajs.com/) - HTTP server
-
