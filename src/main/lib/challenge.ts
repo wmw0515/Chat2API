@@ -2,6 +2,26 @@ import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
 
+const DEEPSEEK_WASM_FILENAME = 'sha3_wasm_bg.7b9ca65ddd.wasm'
+
+function resolveDeepSeekWasmPath(): string {
+  const candidates: string[] = []
+
+  if (app && app.isPackaged) {
+    candidates.push(path.join(process.resourcesPath, DEEPSEEK_WASM_FILENAME))
+  }
+
+  if (app && typeof app.getAppPath === 'function') {
+    candidates.push(path.join(app.getAppPath(), DEEPSEEK_WASM_FILENAME))
+  }
+
+  candidates.push(path.join(process.cwd(), DEEPSEEK_WASM_FILENAME))
+  candidates.push(path.join(__dirname, '../../sha3_wasm_bg.7b9ca65ddd.wasm'))
+
+  const existingPath = candidates.find(candidate => fs.existsSync(candidate))
+  return existingPath || candidates[0]
+}
+
 export class DeepSeekHash {
   private wasmInstance: any
   private offset: number = 0
@@ -137,15 +157,16 @@ export async function getDeepSeekHash(): Promise<DeepSeekHash> {
 
   deepSeekHashInitPromise = (async () => {
     const instance = new DeepSeekHash()
-    // Use different paths for development and production environments
-    const wasmPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'sha3_wasm_bg.7b9ca65ddd.wasm')
-      : path.join(app.getAppPath(), 'sha3_wasm_bg.7b9ca65ddd.wasm')
+    const wasmPath = resolveDeepSeekWasmPath()
     const wasmExists = fs.existsSync(wasmPath)
     console.log('[DeepSeekHash] WASM path:', wasmPath)
     console.log('[DeepSeekHash] File exists:', wasmExists)
 
     try {
+      if (!wasmExists) {
+        throw new Error(`DeepSeek WASM file not found at: ${wasmPath}`)
+      }
+
       await instance.init(wasmPath)
       deepSeekHashInstance = instance
       console.log('[DeepSeekHash] WASM initialized successfully')
