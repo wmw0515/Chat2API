@@ -2,6 +2,8 @@
 
 This phase adds a minimal backend-only runtime that starts the existing OpenAI-compatible proxy without Electron windows, tray, or IPC UI bootstrapping.
 
+See also: `docs/headless-systemd.md` for a minimal Linux `systemd` deployment example.
+
 ## What changed
 
 - Added a dedicated headless entrypoint: `src/main/headless.ts`.

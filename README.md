@@ -190,6 +190,7 @@ Notes:
 - Exported credential files are sensitive and effectively equivalent to login/session tokens. Handle and store them like secrets.
 - This browser flow is intentionally scoped to provider/account CRUD + validation + basic import/export (not full desktop parity).
 - See `docs/headless-phase1.md` for architecture notes, run instructions, and current limitations.
+- For minimal Linux service deployment, see `docs/headless-systemd.md`.
 
 ## 📸 Screenshots
 
