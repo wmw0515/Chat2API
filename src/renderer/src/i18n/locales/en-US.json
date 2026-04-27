@@ -775,6 +775,24 @@
     "gplLicense": "GNU General Public License v3.0",
     "acknowledgments": "Acknowledgments",
     "acknowledgmentsDesc": "Thanks to the following open source projects",
+    "healthCheckScheduler": {
+      "title": "Scheduled health checks",
+      "description": "Configure periodic model health probing for enabled providers",
+      "enabled": "Enable scheduled health checks",
+      "running": "Scheduler is running",
+      "stopped": "Scheduler is stopped",
+      "minIntervalHours": "Minimum interval (hours)",
+      "maxIntervalHours": "Maximum interval (hours)",
+      "helper": "Recommended 12-24 hours to avoid frequent web-provider probing. Changes take effect immediately.",
+      "aggressiveWarning": "Low interval values may trigger frequent probing and increase risk of rate limiting.",
+      "save": "Save",
+      "saveSuccess": "Scheduled health check settings saved",
+      "validation": {
+        "invalidNumber": "Please enter valid numbers for both intervals",
+        "minTooSmall": "Intervals must be greater than or equal to 1 hour",
+        "maxTooSmall": "Maximum interval must be greater than or equal to minimum interval"
+      }
+    },
     "managementApi": {
       "title": "Management API",
       "description": "Configure the Management API for programmatic access to platform settings",

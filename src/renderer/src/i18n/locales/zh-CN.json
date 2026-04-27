@@ -775,6 +775,24 @@
     "gplLicense": "GNU 通用公共许可证 v3.0",
     "acknowledgments": "致谢",
     "acknowledgmentsDesc": "感谢以下开源项目",
+    "healthCheckScheduler": {
+      "title": "定时健康检测",
+      "description": "配置已启用供应商的模型健康定时探测",
+      "enabled": "启用定时健康检测",
+      "running": "调度器运行中",
+      "stopped": "调度器未运行",
+      "minIntervalHours": "最小检测间隔（小时）",
+      "maxIntervalHours": "最大检测间隔（小时）",
+      "helper": "建议保持 12-24 小时，避免频繁请求网页端厂商。保存后立即生效。",
+      "aggressiveWarning": "间隔过小可能导致探测过于频繁，并增加限流风险。",
+      "save": "保存",
+      "saveSuccess": "定时健康检测设置已保存",
+      "validation": {
+        "invalidNumber": "请为两个间隔输入有效数字",
+        "minTooSmall": "间隔必须大于或等于 1 小时",
+        "maxTooSmall": "最大间隔必须大于或等于最小间隔"
+      }
+    },
     "managementApi": {
       "title": "管理 API",
       "description": "配置管理 API 以通过程序化方式访问平台设置",

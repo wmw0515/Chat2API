@@ -243,6 +243,17 @@ export class ProxyServer {
       return { message: 'Unknown error', code: 'dashboard_request_failed' }
     }
 
+    const parseSchedulerHours = (value: unknown): number | null => {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null
+      }
+      const normalized = Math.floor(value)
+      if (normalized < 1) {
+        return null
+      }
+      return normalized
+    }
+
     const healthCheckService = HealthCheckService.getInstance()
 
     type DashboardExportAccount = Omit<Account, 'credentials'> & { credentials?: Record<string, string> }
@@ -752,6 +763,47 @@ export class ProxyServer {
 
     this.router.get('/dashboard-api/providers/health-check-scheduler-status', withDashboardErrorHandling(async (ctx) => {
       ctx.body = healthCheckService.getSchedulerStatus()
+    }))
+
+    this.router.get('/dashboard-api/health-check-scheduler/config', withDashboardErrorHandling(async (ctx) => {
+      ctx.body = healthCheckService.getSchedulerStatus()
+    }))
+
+    this.router.put('/dashboard-api/health-check-scheduler/config', withDashboardErrorHandling(async (ctx) => {
+      const payload = (ctx.request.body || {}) as Record<string, unknown>
+      const enabled = Boolean(payload.enabled)
+      const minIntervalHours = parseSchedulerHours(payload.minIntervalHours)
+      const maxIntervalHours = parseSchedulerHours(payload.maxIntervalHours)
+
+      if (minIntervalHours === null || maxIntervalHours === null) {
+        ctx.status = 400
+        ctx.body = {
+          success: false,
+          error: {
+            code: 'invalid_scheduler_interval',
+            message: 'minIntervalHours and maxIntervalHours must be valid numbers and >= 1',
+          },
+        }
+        return
+      }
+
+      if (maxIntervalHours < minIntervalHours) {
+        ctx.status = 400
+        ctx.body = {
+          success: false,
+          error: {
+            code: 'invalid_scheduler_interval',
+            message: 'maxIntervalHours must be greater than or equal to minIntervalHours',
+          },
+        }
+        return
+      }
+
+      ctx.body = healthCheckService.updateSchedulerConfig({
+        enabled,
+        minIntervalHours,
+        maxIntervalHours,
+      })
     }))
 
     this.router.post('/dashboard-api/providers/:providerId/models/check-all', withDashboardErrorHandling(async (ctx) => {

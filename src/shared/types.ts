@@ -137,6 +137,9 @@ export interface AppConfig {
   oauthProxyMode: 'system' | 'none'
   sessionConfig: SessionConfig
   toolPromptConfig: ToolPromptConfig
+  managementApi: ManagementApiConfig
+  contextManagement: ContextManagementConfig
+  healthCheckScheduler: HealthCheckSchedulerConfig
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -241,6 +244,32 @@ export interface ManagementApiConfig {
   enableManagementApi: boolean
   managementApiSecret: string
   managementApiPort?: number
+}
+
+export interface ContextManagementConfig {
+  enabled: boolean
+  strategies: {
+    slidingWindow: {
+      enabled: boolean
+      maxMessages: number
+    }
+    tokenLimit: {
+      enabled: boolean
+      maxTokens: number
+    }
+    summary: {
+      enabled: boolean
+      keepRecentMessages: number
+      summaryPrompt?: string
+    }
+  }
+  executionOrder: Array<'slidingWindow' | 'tokenLimit' | 'summary'>
+}
+
+export interface HealthCheckSchedulerConfig {
+  enabled: boolean
+  minIntervalHours: number
+  maxIntervalHours: number
 }
 
 export interface ManagementApiResponse<T = unknown> {

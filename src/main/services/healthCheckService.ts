@@ -4,6 +4,7 @@ import { AccountManager } from '../store/accounts'
 import { requestForwarder } from '../proxy/forwarder'
 import { classifyProviderError, sanitizeRuntimeErrorMessage } from '../proxy/utils/runtimeError'
 import type { Account, Provider } from '../store/types'
+import type { HealthCheckSchedulerConfig } from '../../shared/types'
 import type { ChatCompletionRequest, ProxyContext } from '../proxy/types'
 import type { RuntimeErrorCode } from '../../shared/types'
 
@@ -52,6 +53,21 @@ const parsePositiveIntEnv = (key: string, fallback: number): number => {
   return parsed
 }
 
+const normalizeSchedulerConfig = (config: Partial<HealthCheckSchedulerConfig>): HealthCheckSchedulerConfig => {
+  const enabled = Boolean(config.enabled)
+  const minIntervalHours = Number.isFinite(config.minIntervalHours) && Number(config.minIntervalHours) >= 1
+    ? Math.floor(Number(config.minIntervalHours))
+    : 12
+  const maxCandidate = Number.isFinite(config.maxIntervalHours) && Number(config.maxIntervalHours) >= 1
+    ? Math.floor(Number(config.maxIntervalHours))
+    : 24
+  return {
+    enabled,
+    minIntervalHours,
+    maxIntervalHours: Math.max(minIntervalHours, maxCandidate),
+  }
+}
+
 const sanitizeHealthErrorMessage = (message: string): string => {
   return message.replace(SENSITIVE_FIELD_PATTERN, '[REDACTED]')
 }
@@ -59,11 +75,11 @@ const sanitizeHealthErrorMessage = (message: string): string => {
 export class HealthCheckService {
   private static instance: HealthCheckService | null = null
 
-  private enabled = process.env.CHAT2API_HEALTH_CHECK_ENABLED === '1'
+  private enabled = false
 
-  private minIntervalHours = parsePositiveIntEnv('CHAT2API_HEALTH_CHECK_MIN_INTERVAL_HOURS', 12)
+  private minIntervalHours = 12
 
-  private maxIntervalHours = parsePositiveIntEnv('CHAT2API_HEALTH_CHECK_MAX_INTERVAL_HOURS', 24)
+  private maxIntervalHours = 24
 
   private readonly providerState = new Map<string, SchedulerProviderState>()
 
@@ -78,9 +94,7 @@ export class HealthCheckService {
   private nextScheduledRunAt?: number
 
   private constructor() {
-    if (this.maxIntervalHours < this.minIntervalHours) {
-      this.maxIntervalHours = this.minIntervalHours
-    }
+    this.loadSchedulerConfig()
   }
 
   static getInstance(): HealthCheckService {
@@ -102,8 +116,38 @@ export class HealthCheckService {
     }
   }
 
+  getSchedulerConfig(): HealthCheckSchedulerConfig {
+    return {
+      enabled: this.enabled,
+      minIntervalHours: this.minIntervalHours,
+      maxIntervalHours: this.maxIntervalHours,
+    }
+  }
+
+  updateSchedulerConfig(config: Partial<HealthCheckSchedulerConfig>): ScheduledHealthCheckStatus {
+    const normalized = normalizeSchedulerConfig({
+      ...this.getSchedulerConfig(),
+      ...config,
+    })
+    this.enabled = normalized.enabled
+    this.minIntervalHours = normalized.minIntervalHours
+    this.maxIntervalHours = normalized.maxIntervalHours
+    storeManager.updateConfig({ healthCheckScheduler: normalized })
+    this.restartScheduler()
+    storeManager.addLog('info', '[HealthCheckScheduler] Config updated', { data: normalized })
+    return this.getSchedulerStatus()
+  }
+
+  restartScheduler(): void {
+    this.stopScheduler()
+    this.startScheduler()
+  }
+
   startScheduler(): void {
-    if (!this.enabled || this.running) {
+    if (this.running) {
+      return
+    }
+    if (!this.enabled) {
       return
     }
     this.running = true
@@ -127,6 +171,27 @@ export class HealthCheckService {
     this.running = false
     this.nextScheduledRunAt = undefined
     storeManager.addLog('info', '[HealthCheckScheduler] Stopped')
+  }
+
+  private loadSchedulerConfig(): void {
+    const config = storeManager.getConfig()
+    const hasStoredConfig = config.healthCheckScheduler && typeof config.healthCheckScheduler === 'object'
+    const envConfig: HealthCheckSchedulerConfig = normalizeSchedulerConfig({
+      enabled: process.env.CHAT2API_HEALTH_CHECK_ENABLED === '1',
+      minIntervalHours: parsePositiveIntEnv('CHAT2API_HEALTH_CHECK_MIN_INTERVAL_HOURS', 12),
+      maxIntervalHours: parsePositiveIntEnv('CHAT2API_HEALTH_CHECK_MAX_INTERVAL_HOURS', 24),
+    })
+    const runtimeConfig = hasStoredConfig
+      ? normalizeSchedulerConfig(config.healthCheckScheduler)
+      : envConfig
+
+    this.enabled = runtimeConfig.enabled
+    this.minIntervalHours = runtimeConfig.minIntervalHours
+    this.maxIntervalHours = runtimeConfig.maxIntervalHours
+
+    if (!hasStoredConfig) {
+      storeManager.updateConfig({ healthCheckScheduler: runtimeConfig })
+    }
   }
 
   async checkModel(providerId: string, modelId: string): Promise<HealthCheckResult> {

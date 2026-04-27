@@ -17,6 +17,7 @@ import type {
   EffectiveModel,
   ProviderPreset,
   ProviderConfigOverride,
+  HealthCheckSchedulerConfig,
 } from '../shared/types'
 
 const proxyAPI = {
@@ -210,6 +211,32 @@ const providersAPI = {
     }>
   }> =>
     ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_HEALTH_SCHEDULER_STATUS),
+  getHealthSchedulerConfig: (): Promise<{
+    enabled: boolean
+    minIntervalHours: number
+    maxIntervalHours: number
+    running: boolean
+    lastScheduledRunAt?: number
+    nextScheduledRunAt?: number
+    providerStates: Record<string, {
+      lastScheduledHealthCheckAt?: number
+      nextScheduledHealthCheckAt?: number
+    }>
+  }> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_HEALTH_SCHEDULER_CONFIG),
+  updateHealthSchedulerConfig: (config: HealthCheckSchedulerConfig): Promise<{
+    enabled: boolean
+    minIntervalHours: number
+    maxIntervalHours: number
+    running: boolean
+    lastScheduledRunAt?: number
+    nextScheduledRunAt?: number
+    providerStates: Record<string, {
+      lastScheduledHealthCheckAt?: number
+      nextScheduledHealthCheckAt?: number
+    }>
+  }> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_UPDATE_HEALTH_SCHEDULER_CONFIG, config),
 }
 
 const accountsAPI = {

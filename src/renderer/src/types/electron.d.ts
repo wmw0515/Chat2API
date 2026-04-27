@@ -24,6 +24,7 @@ import type {
   EffectiveModel,
   ProviderPreset,
   ProviderConfigOverride,
+  HealthCheckSchedulerConfig,
 } from '../../../shared/types'
 
 export type { 
@@ -52,6 +53,7 @@ export type {
   EffectiveModel,
   ProviderPreset,
   ProviderConfigOverride,
+  HealthCheckSchedulerConfig,
 }
 
 export interface CustomProviderFormData {
@@ -182,6 +184,30 @@ interface ProvidersAPI {
     }>
   }>
   getHealthSchedulerStatus: () => Promise<{
+    enabled: boolean
+    minIntervalHours: number
+    maxIntervalHours: number
+    running: boolean
+    lastScheduledRunAt?: number
+    nextScheduledRunAt?: number
+    providerStates: Record<string, {
+      lastScheduledHealthCheckAt?: number
+      nextScheduledHealthCheckAt?: number
+    }>
+  }>
+  getHealthSchedulerConfig: () => Promise<{
+    enabled: boolean
+    minIntervalHours: number
+    maxIntervalHours: number
+    running: boolean
+    lastScheduledRunAt?: number
+    nextScheduledRunAt?: number
+    providerStates: Record<string, {
+      lastScheduledHealthCheckAt?: number
+      nextScheduledHealthCheckAt?: number
+    }>
+  }>
+  updateHealthSchedulerConfig: (config: HealthCheckSchedulerConfig) => Promise<{
     enabled: boolean
     minIntervalHours: number
     maxIntervalHours: number
