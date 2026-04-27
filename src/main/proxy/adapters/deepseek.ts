@@ -65,6 +65,17 @@ interface ChatCompletionRequest {
   tool_choice?: any
 }
 
+interface DeepSeekCompletionPayload {
+  chat_session_id: string
+  prompt: string
+  ref_file_ids: string[]
+  search_enabled: boolean
+  thinking_enabled: boolean
+  parent_message_id: null
+  preprompt: false
+  model_type?: 'expert'
+}
+
 const tokenCache = new Map<string, TokenInfo>()
 const sessionCache = new Map<string, { sessionId: string; createdAt: number }>()
 
@@ -116,6 +127,12 @@ export class DeepSeekAdapter {
     })
     this.token = account.credentials.token || account.credentials.apiKey || account.credentials.refreshToken || ''
     console.log('[DeepSeek] Token configured:', Boolean(this.token))
+  }
+
+  private resolveModelType(thinkingEnabled: boolean): 'expert' | undefined {
+    // Only set model_type for expert/thinking mode.
+    // Keep non-thinking/fast mode conservative until browser payload is verified.
+    return thinkingEnabled ? 'expert' : undefined
   }
 
   private async acquireToken(): Promise<string> {
@@ -419,15 +436,27 @@ ${message.content || ''}
       console.log('[DeepSeek] Reasoning mode enabled (from prompt)')
     }
 
+    const modelType = this.resolveModelType(thinkingEnabled)
+    const payload: DeepSeekCompletionPayload = {
+      chat_session_id: sessionId,
+      prompt,
+      ref_file_ids: [],
+      search_enabled: searchEnabled,
+      thinking_enabled: thinkingEnabled,
+      parent_message_id: null,
+      preprompt: false,
+      ...(modelType ? { model_type: modelType } : {}),
+    }
+
+    console.log('[DeepSeek] Completion mode:', {
+      searchEnabled,
+      thinkingEnabled,
+      modelType: modelType || null,
+    })
+
     const response = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
-      {
-        chat_session_id: sessionId,
-        prompt,
-        ref_file_ids: [],
-        search_enabled: searchEnabled,
-        thinking_enabled: thinkingEnabled,
-      },
+      payload,
       {
         headers: {
           Authorization: `Bearer ${token}`,
