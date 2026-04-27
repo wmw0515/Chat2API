@@ -704,28 +704,7 @@ export class ProxyServer {
         ctx.body = { success: false, error: { code: 'invalid_model_id', message: 'modelId is required' } }
         return
       }
-
-      const account = AccountManager.getAvailable(providerId).find(item => item.status === 'active')
-      if (!account) {
-        ctx.status = 400
-        ctx.body = {
-          success: false,
-          providerId,
-          model: modelId,
-          actualModel: modelId,
-          status: 'unknown_error',
-          errorCode: 'no_available_account',
-          errorMessage: 'No active account with credentials available for health check',
-          checkedAt: Date.now(),
-        }
-        return
-      }
-
-      const effectiveModels = storeManager.getEffectiveModels(providerId)
-      const mapped = effectiveModels.find(item => item.displayName === modelId)
-      const actualModel = mapped?.actualModelId || modelId
-      const result = await healthCheckService.runMinimalProbe(provider, account, modelId, actualModel)
-      ctx.body = result
+      ctx.body = await healthCheckService.checkModel(providerId, modelId)
     }))
 
     this.router.post('/dashboard-api/accounts/:accountId/check', withDashboardErrorHandling(async (ctx) => {
@@ -736,41 +715,7 @@ export class ProxyServer {
         ctx.body = { success: false, error: { code: 'account_not_found', message: `Account not found: ${accountId}` } }
         return
       }
-      const provider = ProviderManager.getById(account.providerId)
-      if (!provider) {
-        ctx.status = 404
-        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${account.providerId}` } }
-        return
-      }
-
-      const effectiveModels = storeManager.getEffectiveModels(provider.id)
-      const sourcePriority: Record<'manual' | 'static' | 'discovered', number> = {
-        manual: 0,
-        static: 1,
-        discovered: 2,
-      }
-      const selectedModel = [...effectiveModels].sort((a, b) => {
-        const sourceA = a.source || 'static'
-        const sourceB = b.source || 'static'
-        return sourcePriority[sourceA] - sourcePriority[sourceB]
-      })[0]
-
-      if (!selectedModel) {
-        ctx.status = 400
-        ctx.body = {
-          success: false,
-          providerId: provider.id,
-          accountId: account.id,
-          status: 'unknown_error',
-          errorCode: 'no_model_available',
-          errorMessage: 'No effective model available for health check',
-          checkedAt: Date.now(),
-        }
-        return
-      }
-
-      const result = await healthCheckService.runMinimalProbe(provider, account, selectedModel.displayName, selectedModel.actualModelId)
-      ctx.body = result
+      ctx.body = await healthCheckService.checkAccount(account.id)
     }))
 
     this.router.get('/dashboard-api/providers/health-check-scheduler-status', withDashboardErrorHandling(async (ctx) => {
@@ -824,12 +769,6 @@ export class ProxyServer {
       if (!provider) {
         ctx.status = 404
         ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${providerId}` } }
-        return
-      }
-      const account = AccountManager.getAvailable(providerId).find(item => item.status === 'active')
-      if (!account) {
-        ctx.status = 400
-        ctx.body = { success: false, error: { code: 'account_not_found', message: `No active account for provider: ${providerId}` } }
         return
       }
       ctx.body = await healthCheckService.checkAllModels(providerId)

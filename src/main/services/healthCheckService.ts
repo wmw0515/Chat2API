@@ -292,23 +292,30 @@ export class HealthCheckService {
     }
 
     const account = this.pickActiveAccount(providerId)
+    const effectiveModels = storeManager.getEffectiveModels(providerId)
+    const mapped = effectiveModels.find(item => item.displayName === modelId)
+    const actualModel = mapped?.actualModelId || modelId
     if (!account) {
+      const checkedAt = Date.now()
+      storeManager.markModelRuntimeFailure(
+        providerId,
+        modelId,
+        actualModel,
+        'unknown_error',
+        'No active account with credentials available for health check',
+      )
       return {
         success: false,
         providerId,
         accountId: '',
         model: modelId,
-        actualModel: modelId,
+        actualModel,
         status: 'unknown_error',
         errorCode: 'no_available_account',
         errorMessage: 'No active account with credentials available for health check',
-        checkedAt: Date.now(),
+        checkedAt,
       }
     }
-
-    const effectiveModels = storeManager.getEffectiveModels(providerId)
-    const mapped = effectiveModels.find(item => item.displayName === modelId)
-    const actualModel = mapped?.actualModelId || modelId
     return this.runMinimalProbe(provider, account, modelId, actualModel)
   }
 
@@ -325,11 +332,44 @@ export class HealthCheckService {
     }
 
     const account = this.pickActiveAccount(providerId)
-    if (!account) {
-      throw new Error(`No active account for provider: ${providerId}`)
+    const effectiveModels = storeManager.getEffectiveModels(providerId)
+    if (effectiveModels.length === 0) {
+      return {
+        providerId,
+        checked: 0,
+        available: 0,
+        failed: 0,
+        results: [],
+      }
     }
 
-    const effectiveModels = storeManager.getEffectiveModels(providerId)
+    if (!account) {
+      const checkedAt = Date.now()
+      const errorMessage = 'No active account with credentials available for health check'
+      const results: HealthCheckResult[] = effectiveModels.map((model) => {
+        storeManager.markModelRuntimeFailure(providerId, model.displayName, model.actualModelId, 'unknown_error', errorMessage)
+        return {
+          success: false,
+          providerId,
+          accountId: '',
+          model: model.displayName,
+          actualModel: model.actualModelId,
+          status: 'unknown_error',
+          errorCode: 'no_available_account',
+          errorMessage,
+          checkedAt,
+        }
+      })
+
+      return {
+        providerId,
+        checked: results.length,
+        available: 0,
+        failed: results.length,
+        results,
+      }
+    }
+
     const results: HealthCheckResult[] = []
 
     for (let index = 0; index < effectiveModels.length; index += 1) {
@@ -494,7 +534,7 @@ export class HealthCheckService {
       const sanitizedError = sanitizeHealthErrorMessage(
         sanitizeRuntimeErrorMessage(error instanceof Error ? error.message : 'Health check failed'),
       )
-      const category: RuntimeStatus = 'connection_error'
+      const category = classifyProviderError(provider.id, { message: sanitizedError }) || 'unknown_error'
       this.applyFailureState(provider.id, model, actualModel, account, category, sanitizedError, checkedAt)
       return {
         success: false,
