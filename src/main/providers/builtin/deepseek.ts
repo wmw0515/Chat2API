@@ -47,7 +47,7 @@ export const deepseekConfig: BuiltinProviderConfig = {
       type: 'password',
       required: true,
       placeholder: 'Enter DeepSeek user token',
-      helpText: 'Authentication token obtained from DeepSeek web version, found in browser DevTools Application -> Local Storage',
+      helpText: 'Copy the token after Authorization: Bearer from DeepSeek web requests, or find the corresponding token in Local Storage. Enter only the token value, without Bearer, quotes, or JSON wrapper.',
     },
   ],
   tokenCheckEndpoint: '/v0/users/current',

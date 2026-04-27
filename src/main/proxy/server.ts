@@ -256,6 +256,25 @@ export class ProxyServer {
       providerPresets: ProviderPreset[]
     }
 
+    const shouldIncludeCredentials = (value: unknown): boolean => {
+      if (typeof value === 'boolean') {
+        return value
+      }
+      if (typeof value === 'number') {
+        return value === 1
+      }
+      if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase()
+        return normalized === '1' || normalized === 'true'
+      }
+      return false
+    }
+
+    const stripAccountCredentials = (account: Account): Omit<Account, 'credentials'> => {
+      const { credentials: _credentials, ...safeAccount } = account
+      return safeAccount
+    }
+
     const toDashboardExport = (includeCredentials: boolean): DashboardExportPayload => {
       const providers = ProviderManager.getAll()
       const accounts = AccountManager.getAll(includeCredentials)
@@ -269,8 +288,7 @@ export class ProxyServer {
           if (includeCredentials) {
             return account
           }
-          const { credentials: _credentials, ...safeAccount } = account
-          return safeAccount
+          return stripAccountCredentials(account)
         }),
         providerConfigOverrides: storeManager.getProviderConfigOverrides(),
         providerPresets: storeManager.getProviderPresets(),
@@ -755,22 +773,25 @@ export class ProxyServer {
 
     this.router.get('/dashboard-api/accounts', withDashboardErrorHandling(async (ctx) => {
       const providerId = typeof ctx.query.providerId === 'string' ? ctx.query.providerId : undefined
+      const includeCredentials = shouldIncludeCredentials(ctx.query.includeCredentials)
       if (providerId) {
-        ctx.body = AccountManager.getByProviderId(providerId, false)
+        const accounts = AccountManager.getByProviderId(providerId, includeCredentials)
+        ctx.body = includeCredentials ? accounts : accounts.map(stripAccountCredentials)
         return
       }
-      ctx.body = AccountManager.getAll(false)
+      const accounts = AccountManager.getAll(includeCredentials)
+      ctx.body = includeCredentials ? accounts : accounts.map(stripAccountCredentials)
     }))
 
     this.router.get('/dashboard-api/accounts/:id', withDashboardErrorHandling(async (ctx) => {
-      const includeCredentials = String(ctx.query.includeCredentials || '0') === '1'
+      const includeCredentials = shouldIncludeCredentials(ctx.query.includeCredentials)
       const account = AccountManager.getById(ctx.params.id, includeCredentials)
       if (!account) {
         ctx.status = 404
         ctx.body = { success: false, error: { code: 'account_not_found', message: `Account not found: ${ctx.params.id}` } }
         return
       }
-      ctx.body = account
+      ctx.body = includeCredentials ? account : stripAccountCredentials(account)
     }))
 
     this.router.post('/dashboard-api/accounts', withDashboardErrorHandling(async (ctx) => {
@@ -853,7 +874,7 @@ export class ProxyServer {
     })
 
     this.router.get('/dashboard-api/export', withDashboardErrorHandling(async (ctx) => {
-      const includeCredentials = String(ctx.query.includeCredentials || '0') === '1'
+      const includeCredentials = shouldIncludeCredentials(ctx.query.includeCredentials)
       ctx.body = toDashboardExport(includeCredentials)
     }))
 
