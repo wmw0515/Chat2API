@@ -15,9 +15,13 @@ import { modelMapper } from '../modelMapper'
 import { storeManager } from '../../store/store'
 import { 
   isAnthropicToolFormat,
-  transformResponseToAnthropic,
-  transformChunkToAnthropic
+  transformResponseToAnthropic
 } from '../utils/toolFormatConverter'
+import {
+  createReasoningContentFilterStream,
+  reasoningContentFilterEnabled,
+  sanitizeOpenAICompatibleResponseBody,
+} from '../utils/reasoningContentFilter'
 
 const router = new Router({ prefix: '/v1/chat' })
 
@@ -272,9 +276,13 @@ router.post('/completions', async (ctx: Context) => {
     })
 
     const userInput = extractUserInput(request.messages)
+    const sanitizedResponseBody = !request.stream && result.body
+      ? sanitizeOpenAICompatibleResponseBody(result.body)
+      : result.body
+
     // Prepare response body for logging (only for non-stream requests)
-    const responseBodyForLog = !request.stream && result.body
-      ? JSON.stringify(result.body)
+    const responseBodyForLog = !request.stream && sanitizedResponseBody
+      ? JSON.stringify(sanitizedResponseBody)
       : undefined
 
     // For streaming requests, we'll collect content and update the log later
@@ -374,17 +382,26 @@ router.post('/completions', async (ctx: Context) => {
         })
       })
 
+      const reasoningFilterStream = reasoningContentFilterEnabled
+        ? createReasoningContentFilterStream()
+        : null
+
       // Check if stream is already in correct SSE format (from adapters like Kimi, GLM, DeepSeek)
       if (result.skipTransform) {
-        // Stream is already formatted, pipe through wrapper and collect
-        result.stream.on('data', (chunk: Buffer) => {
+        // Stream is already formatted
+        const outputStream = reasoningFilterStream || result.stream
+
+        outputStream.on('data', (chunk: Buffer) => {
           collectedContent += chunk.toString()
         })
 
-        result.stream.pipe(wrapperStream, { end: false })
+        if (reasoningFilterStream) {
+          result.stream.pipe(reasoningFilterStream)
+        }
+        outputStream.pipe(wrapperStream, { end: false })
 
         // When source stream ends normally, update log and end wrapper
-        result.stream.once('end', () => {
+        outputStream.once('end', () => {
           // Update log with collected response
           if (logEntryId) {
             storeManager.updateRequestLog(logEntryId, {
@@ -403,15 +420,20 @@ router.post('/completions', async (ctx: Context) => {
           }
         )
 
-        // Collect from transform stream output
-        transformStream.on('data', (chunk: Buffer) => {
+        const outputStream = reasoningFilterStream || transformStream
+
+        // Collect from transformed stream output
+        outputStream.on('data', (chunk: Buffer) => {
           collectedContent += chunk.toString()
         })
 
         result.stream.pipe(transformStream)
-        transformStream.pipe(wrapperStream, { end: false })
+        if (reasoningFilterStream) {
+          transformStream.pipe(reasoningFilterStream)
+        }
+        outputStream.pipe(wrapperStream, { end: false })
 
-        transformStream.once('end', () => {
+        outputStream.once('end', () => {
           // Update log with collected response
           if (logEntryId) {
             storeManager.updateRequestLog(logEntryId, {
@@ -429,10 +451,10 @@ router.post('/completions', async (ctx: Context) => {
       if (result.body) {
         // Check if we need to transform to Anthropic format
         if (isAnthropicToolFormat(request.tool_format)) {
-          ctx.body = transformResponseToAnthropic(result.body)
+          ctx.body = transformResponseToAnthropic(sanitizedResponseBody)
           console.log('[Chat] Transformed response to Anthropic tool format')
         } else {
-          ctx.body = result.body
+          ctx.body = sanitizedResponseBody
         }
       } else {
         ctx.body = {

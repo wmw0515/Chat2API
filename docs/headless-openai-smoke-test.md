@@ -40,6 +40,7 @@ Supported environment variables:
 - `CHAT2API_API_KEY` (optional; used as `Authorization: Bearer ...` on `/v1/*` requests)
 - `CHAT2API_TEST_MODEL` (optional; when set, enables a minimal `POST /v1/chat/completions` test)
 - `CHAT2API_DASHBOARD_TOKEN` (optional; when set, tests `/dashboard-api/health` with `X-Dashboard-Token`)
+- `CHAT2API_INCLUDE_REASONING_CONTENT` (optional; default: off. Set to `1` to preserve upstream `reasoning_content` in OpenAI-compatible chat responses/chunks for debugging)
 
 The script avoids printing sensitive token values.
 
@@ -93,3 +94,4 @@ http://127.0.0.1:8081/v1
 
 - The smoke test is intentionally minimal and does not validate provider-specific behavior.
 - No real credentials are required unless your deployment enables API key auth and/or you run the optional chat completion test.
+- For OpenAI-compatible client behavior (Open WebUI/Hermes/OpenClaw, etc.), `reasoning_content` is filtered from chat responses by default. Set `CHAT2API_INCLUDE_REASONING_CONTENT=1` when you explicitly need raw reasoning traces for debugging.
