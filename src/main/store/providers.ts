@@ -4,7 +4,7 @@
  */
 
 import { storeManager } from './store'
-import { Provider, ProviderType, AuthType, BUILTIN_PROVIDERS } from './types'
+import { Provider, ProviderType, AuthType, BUILTIN_PROVIDERS, ProviderPreset, ProviderConfigOverride } from './types'
 
 /**
  * Provider Manager Class
@@ -23,6 +23,34 @@ export class ProviderManager {
    */
   static getBuiltin(): Provider[] {
     return BUILTIN_PROVIDERS
+  }
+
+  static getProviderPresets(): ProviderPreset[] {
+    return storeManager.getProviderPresets()
+  }
+
+  static createProviderPreset(preset: ProviderPreset): ProviderPreset {
+    return storeManager.addProviderPreset(preset)
+  }
+
+  static updateProviderPreset(presetId: string, updates: Partial<ProviderPreset>): ProviderPreset | null {
+    return storeManager.updateProviderPreset(presetId, updates)
+  }
+
+  static deleteProviderPreset(presetId: string): boolean {
+    return storeManager.deleteProviderPreset(presetId)
+  }
+
+  static getBuiltinOverride(providerId: string): ProviderConfigOverride | undefined {
+    return storeManager.getProviderConfigOverride(providerId)
+  }
+
+  static updateBuiltinOverride(providerId: string, override: ProviderConfigOverride): ProviderConfigOverride {
+    return storeManager.upsertProviderConfigOverride(providerId, override)
+  }
+
+  static resetBuiltinOverride(providerId: string): void {
+    storeManager.deleteProviderConfigOverride(providerId)
   }
 
   /**
@@ -68,6 +96,7 @@ export class ProviderManager {
     name: string
     authType: AuthType
     apiEndpoint: string
+    chatPath?: string
     headers?: Record<string, string>
     description?: string
     icon?: string
@@ -151,12 +180,22 @@ export class ProviderManager {
     }
     
     if (existing.type === 'builtin') {
-      const restricted = ['name', 'authType', 'apiEndpoint']
-      const hasRestricted = restricted.some((key) => key in updates)
-      
-      if (hasRestricted) {
-        throw new Error('Built-in providers cannot modify core configuration')
+      const allowedOverrideKeys = ['apiEndpoint', 'chatPath', 'headers', 'description', 'supportedModels', 'credentialFields', 'enabled', 'status', 'lastStatusCheck']
+      const hasRestricted = Object.keys(updates).some((key) => !allowedOverrideKeys.includes(key))
+      if (hasRestricted) throw new Error('Built-in providers cannot modify providerId/type/adapter binding')
+
+      const { enabled, status, lastStatusCheck, ...overrideUpdates } = updates as any
+      if (Object.keys(overrideUpdates).length > 0) {
+        storeManager.upsertProviderConfigOverride(id, overrideUpdates)
       }
+      const runtimeUpdates: Record<string, unknown> = {}
+      if (typeof enabled === 'boolean') runtimeUpdates.enabled = enabled
+      if (status) runtimeUpdates.status = status
+      if (typeof lastStatusCheck === 'number') runtimeUpdates.lastStatusCheck = lastStatusCheck
+      const updated = Object.keys(runtimeUpdates).length > 0
+        ? storeManager.updateProvider(id, runtimeUpdates as Partial<Provider>)
+        : storeManager.getProviderById(id) || null
+      return updated
     }
     
     const updated = storeManager.updateProvider(id, updates)
@@ -259,6 +298,7 @@ export class ProviderManager {
     
     const allProviders = [...defaultBuiltin, ...customProviders]
     storeManager.getStore()?.set('providers', allProviders)
+    storeManager.getStore()?.set('providerConfigOverrides', {})
     
     storeManager.addLog('info', 'Reset built-in provider configuration')
   }

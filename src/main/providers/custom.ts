@@ -8,6 +8,7 @@ export interface CustomProviderData {
   type?: 'builtin' | 'custom'
   authType: AuthType
   apiEndpoint: string
+  chatPath?: string
   headers?: Record<string, string>
   description?: string
   icon?: string
@@ -175,6 +176,7 @@ export class CustomProviderManager {
       type: data.type || 'custom',
       authType: data.authType,
       apiEndpoint: data.apiEndpoint.trim(),
+      chatPath: data.chatPath?.trim(),
       headers: data.headers || {},
       enabled: true,
       createdAt: now,
@@ -235,6 +237,7 @@ export class CustomProviderManager {
     
     const updated = storeManager.updateProvider(id, {
       ...updates,
+      chatPath: updates.chatPath?.trim(),
       updatedAt: Date.now(),
     })
     

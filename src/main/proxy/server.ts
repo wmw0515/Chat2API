@@ -22,6 +22,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import mime from 'mime-types'
 import type { Account, Provider } from '../store/types'
+import type { ProviderPreset, ProviderConfigOverride } from '../../shared/types'
 
 /**
  * Proxy Server Class
@@ -248,6 +249,8 @@ export class ProxyServer {
       includeCredentials: boolean
       providers: Provider[]
       accounts: DashboardExportAccount[]
+      providerConfigOverrides: Record<string, ProviderConfigOverride>
+      providerPresets: ProviderPreset[]
     }
 
     const toDashboardExport = (includeCredentials: boolean): DashboardExportPayload => {
@@ -266,6 +269,8 @@ export class ProxyServer {
           const { credentials: _credentials, ...safeAccount } = account
           return safeAccount
         }),
+        providerConfigOverrides: storeManager.getProviderConfigOverrides(),
+        providerPresets: storeManager.getProviderPresets(),
       }
     }
 
@@ -410,6 +415,52 @@ export class ProxyServer {
 
     this.router.get('/dashboard-api/providers/builtin', withDashboardErrorHandling(async (ctx) => {
       ctx.body = ProviderManager.getBuiltin()
+    }))
+    this.router.get('/dashboard-api/provider-presets', withDashboardErrorHandling(async (ctx) => {
+      const builtinPresets: ProviderPreset[] = ProviderManager.getBuiltin().map((provider: any) => ({
+        presetId: `builtin:${provider.id}`,
+        name: provider.name,
+        type: 'builtin',
+        providerId: provider.id,
+        authType: provider.authType,
+        apiEndpoint: provider.apiEndpoint,
+        chatPath: provider.chatPath,
+        headers: provider.headers,
+        description: provider.description,
+        supportedModels: provider.supportedModels,
+        credentialFields: provider.credentialFields,
+      }))
+      ctx.body = [...builtinPresets, ...ProviderManager.getProviderPresets()]
+    }))
+    this.router.post('/dashboard-api/provider-presets', withDashboardErrorHandling(async (ctx) => {
+      const body = (ctx.request.body || {}) as ProviderPreset
+      ctx.body = ProviderManager.createProviderPreset({
+        ...body,
+        type: 'custom',
+        presetId: body.presetId || `preset_${Date.now()}`,
+      })
+    }))
+    this.router.put('/dashboard-api/provider-presets/:id', withDashboardErrorHandling(async (ctx) => {
+      const updated = ProviderManager.updateProviderPreset(ctx.params.id, (ctx.request.body || {}) as Partial<ProviderPreset>)
+      if (!updated) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'preset_not_found', message: `Preset not found: ${ctx.params.id}` } }
+        return
+      }
+      ctx.body = updated
+    }))
+    this.router.delete('/dashboard-api/provider-presets/:id', withDashboardErrorHandling(async (ctx) => {
+      ctx.body = { success: ProviderManager.deleteProviderPreset(ctx.params.id) }
+    }))
+    this.router.get('/dashboard-api/providers/:id/override', withDashboardErrorHandling(async (ctx) => {
+      ctx.body = ProviderManager.getBuiltinOverride(ctx.params.id) || {}
+    }))
+    this.router.put('/dashboard-api/providers/:id/override', withDashboardErrorHandling(async (ctx) => {
+      ctx.body = ProviderManager.updateBuiltinOverride(ctx.params.id, (ctx.request.body || {}) as ProviderConfigOverride)
+    }))
+    this.router.delete('/dashboard-api/providers/:id/override', withDashboardErrorHandling(async (ctx) => {
+      ProviderManager.resetBuiltinOverride(ctx.params.id)
+      ctx.body = { success: true }
     }))
 
     this.router.post('/dashboard-api/providers', withDashboardErrorHandling(async (ctx) => {
@@ -711,6 +762,22 @@ export class ProxyServer {
           error: { code: 'invalid_import_payload', message: 'providers and accounts arrays are required' },
         }
         return
+      }
+
+      if (!dryRun && payload.providerConfigOverrides && typeof payload.providerConfigOverrides === 'object') {
+        for (const [providerId, override] of Object.entries(payload.providerConfigOverrides as Record<string, ProviderConfigOverride>)) {
+          try {
+            ProviderManager.updateBuiltinOverride(providerId, override)
+          } catch {
+            // skip invalid overrides
+          }
+        }
+      }
+      if (!dryRun && Array.isArray(payload.providerPresets)) {
+        for (const preset of payload.providerPresets as ProviderPreset[]) {
+          if (!preset?.presetId) continue
+          ProviderManager.updateProviderPreset(preset.presetId, preset) || ProviderManager.createProviderPreset(preset)
+        }
       }
 
       const providerSummary = { created: [] as string[], updated: [] as string[], skipped: [] as string[] }

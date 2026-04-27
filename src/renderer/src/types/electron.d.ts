@@ -22,6 +22,8 @@ import type {
   PromptType,
   ToolPromptConfig,
   EffectiveModel,
+  ProviderPreset,
+  ProviderConfigOverride,
 } from '../../../shared/types'
 
 export type { 
@@ -48,12 +50,15 @@ export type {
   PromptType,
   ToolPromptConfig,
   EffectiveModel,
+  ProviderPreset,
+  ProviderConfigOverride,
 }
 
 export interface CustomProviderFormData {
   name: string
   authType: AuthType
   apiEndpoint: string
+  chatPath?: string
   headers: Record<string, string>
   description: string
   supportedModels: string[]
@@ -83,12 +88,20 @@ interface StoreAPI {
 interface ProvidersAPI {
   getAll: () => Promise<Provider[]>
   getBuiltin: () => Promise<BuiltinProviderConfig[]>
+  getPresets: () => Promise<ProviderPreset[]>
+  createPreset: (preset: ProviderPreset) => Promise<ProviderPreset>
+  updatePreset: (presetId: string, updates: Partial<ProviderPreset>) => Promise<ProviderPreset | null>
+  deletePreset: (presetId: string) => Promise<boolean>
+  getOverride: (providerId: string) => Promise<ProviderConfigOverride | null>
+  updateOverride: (providerId: string, override: ProviderConfigOverride) => Promise<ProviderConfigOverride>
+  deleteOverride: (providerId: string) => Promise<boolean>
   add: (data: {
     id?: string
     name: string
     type?: 'builtin' | 'custom'
     authType: AuthType
     apiEndpoint: string
+    chatPath?: string
     headers?: Record<string, string>
     description?: string
     supportedModels?: string[]

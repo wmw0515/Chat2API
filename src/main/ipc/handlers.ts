@@ -16,7 +16,7 @@ import { TrayManager } from '../tray/TrayManager'
 import { ConfigManager } from '../store/config'
 import { generateManagementSecret } from '../proxy/middleware/managementAuth'
 import { UpdaterManager } from '../updater'
-import type { Provider, Account, ProxyStatus, ProviderCheckResult, OAuthResult, AuthType, CredentialField, LogLevel, LogEntry, ProviderVendor, AppConfig, ValidationResult } from '../../shared/types'
+import type { Provider, Account, ProxyStatus, ProviderCheckResult, OAuthResult, AuthType, CredentialField, LogLevel, LogEntry, ProviderVendor, AppConfig, ValidationResult, ProviderPreset, ProviderConfigOverride } from '../../shared/types'
 import type { SystemPrompt, SessionConfig, SessionRecord, ManagementApiConfig } from '../store/types'
 import type { ProviderType } from '../oauth/types'
 
@@ -220,6 +220,16 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   ipcMain.handle(IpcChannels.PROVIDERS_GET_BUILTIN, async () => {
     return getBuiltinProviders()
   })
+  ipcMain.handle(IpcChannels.PROVIDERS_GET_PRESETS, async (): Promise<ProviderPreset[]> => ProviderManager.getProviderPresets())
+  ipcMain.handle(IpcChannels.PROVIDERS_CREATE_PRESET, async (_, preset: ProviderPreset): Promise<ProviderPreset> => ProviderManager.createProviderPreset(preset))
+  ipcMain.handle(IpcChannels.PROVIDERS_UPDATE_PRESET, async (_, presetId: string, updates: Partial<ProviderPreset>): Promise<ProviderPreset | null> => ProviderManager.updateProviderPreset(presetId, updates))
+  ipcMain.handle(IpcChannels.PROVIDERS_DELETE_PRESET, async (_, presetId: string): Promise<boolean> => ProviderManager.deleteProviderPreset(presetId))
+  ipcMain.handle(IpcChannels.PROVIDERS_GET_OVERRIDE, async (_, providerId: string): Promise<ProviderConfigOverride | null> => ProviderManager.getBuiltinOverride(providerId) || null)
+  ipcMain.handle(IpcChannels.PROVIDERS_UPDATE_OVERRIDE, async (_, providerId: string, override: ProviderConfigOverride): Promise<ProviderConfigOverride> => ProviderManager.updateBuiltinOverride(providerId, override))
+  ipcMain.handle(IpcChannels.PROVIDERS_DELETE_OVERRIDE, async (_, providerId: string): Promise<boolean> => {
+    ProviderManager.resetBuiltinOverride(providerId)
+    return true
+  })
 
   ipcMain.handle(IpcChannels.PROVIDERS_ADD, async (_, data: {
     id?: string
@@ -227,6 +237,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     type?: 'builtin' | 'custom'
     authType: AuthType
     apiEndpoint: string
+    chatPath?: string
     headers?: Record<string, string>
     description?: string
     supportedModels?: string[]

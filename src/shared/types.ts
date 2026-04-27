@@ -73,8 +73,32 @@ export interface Provider {
   icon?: string
   supportedModels?: string[]
   modelMappings?: Record<string, string>
+  credentialFields?: CredentialField[]
   status?: ProviderStatus
   lastStatusCheck?: number
+}
+
+export interface ProviderPreset {
+  presetId: string
+  name: string
+  type: 'builtin' | 'custom'
+  providerId?: string
+  authType: AuthType
+  apiEndpoint: string
+  chatPath?: string
+  headers: Record<string, string>
+  description?: string
+  supportedModels?: string[]
+  credentialFields?: CredentialField[]
+}
+
+export interface ProviderConfigOverride {
+  apiEndpoint?: string
+  chatPath?: string
+  headers?: Record<string, string>
+  description?: string
+  supportedModels?: string[]
+  credentialFields?: CredentialField[]
 }
 
 export interface ModelMapping {
