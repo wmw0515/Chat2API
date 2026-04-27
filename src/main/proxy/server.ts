@@ -18,14 +18,12 @@ import ConfigManager from '../store/config'
 import { ProviderChecker } from '../providers/checker'
 import { discoverProviderModels, providerSupportsModelDiscovery } from '../providers/modelDiscovery'
 import { validateCredentials } from '../store/validator'
-import { requestForwarder } from './forwarder'
-import { classifyProviderError, sanitizeRuntimeErrorMessage } from './utils/runtimeError'
-import type { ChatCompletionRequest, ProxyContext } from './types'
 import fs from 'node:fs'
 import path from 'node:path'
 import mime from 'mime-types'
 import type { Account, Provider } from '../store/types'
 import type { ProviderPreset, ProviderConfigOverride } from '../../shared/types'
+import { HealthCheckService } from '../services/healthCheckService'
 
 /**
  * Proxy Server Class
@@ -245,134 +243,7 @@ export class ProxyServer {
       return { message: 'Unknown error', code: 'dashboard_request_failed' }
     }
 
-    const HEALTH_CHECK_TIMEOUT_MS = 30_000
-    const HEALTH_CHECK_PROMPT = 'Please reply only: ok'
-
-    const delay = async (ms: number): Promise<void> => {
-      await new Promise(resolve => setTimeout(resolve, ms))
-    }
-
-    type ManualCheckResult = {
-      success: boolean
-      providerId: string
-      accountId: string
-      model: string
-      actualModel: string
-      status: 'available' | 'credential_error' | 'model_invalid' | 'connection_error' | 'unknown_error'
-      errorCode?: string
-      errorMessage?: string
-      checkedAt: number
-    }
-
-    const runMinimalProbe = async (
-      provider: Provider,
-      account: Account,
-      model: string,
-      actualModel: string,
-    ): Promise<ManualCheckResult> => {
-      const startedAt = Date.now()
-      const request: ChatCompletionRequest = {
-        model,
-        messages: [{ role: 'user', content: HEALTH_CHECK_PROMPT }],
-        stream: false,
-        max_tokens: 8,
-        temperature: 0,
-      }
-      const context: ProxyContext = {
-        requestId: `healthchk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-        providerId: provider.id,
-        accountId: account.id,
-        model,
-        actualModel,
-        startTime: startedAt,
-        isStream: false,
-        clientIP: 'dashboard',
-      }
-
-      try {
-        const result = await Promise.race([
-          requestForwarder.forwardChatCompletion(request, account, provider, actualModel, context),
-          new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error('Health check timeout')), HEALTH_CHECK_TIMEOUT_MS)
-          }),
-        ])
-
-        const checkedAt = Date.now()
-        if (result.success) {
-          storeManager.markModelRuntimeSuccess(provider.id, model, actualModel)
-          storeManager.updateAccount(account.id, {
-            healthStatus: 'active',
-            lastRuntimeSuccessAt: checkedAt,
-            lastRuntimeErrorCode: undefined,
-            lastRuntimeErrorMessage: undefined,
-          })
-          return {
-            success: true,
-            providerId: provider.id,
-            accountId: account.id,
-            model,
-            actualModel,
-            status: 'available',
-            checkedAt,
-          }
-        }
-
-        const sanitizedError = sanitizeRuntimeErrorMessage(result.error || 'Health check failed')
-        const category = classifyProviderError(provider.id, {
-          status: result.status,
-          message: sanitizedError,
-        })
-        storeManager.markModelRuntimeFailure(provider.id, model, actualModel, category, sanitizedError)
-        const runtimeFailureUpdates = {
-          lastRuntimeFailureAt: checkedAt,
-          lastRuntimeErrorCode: category,
-          lastRuntimeErrorMessage: sanitizedError,
-          runtimeFailureCount: (account.runtimeFailureCount || 0) + 1,
-        }
-        if (category === 'credential_error') {
-          storeManager.updateAccount(account.id, {
-            ...runtimeFailureUpdates,
-            healthStatus: 'invalid',
-          })
-        } else {
-          storeManager.updateAccount(account.id, runtimeFailureUpdates)
-        }
-
-        return {
-          success: false,
-          providerId: provider.id,
-          accountId: account.id,
-          model,
-          actualModel,
-          status: category,
-          errorCode: category,
-          errorMessage: sanitizedError,
-          checkedAt,
-        }
-      } catch (error) {
-        const checkedAt = Date.now()
-        const sanitizedError = sanitizeRuntimeErrorMessage(error instanceof Error ? error.message : 'Health check failed')
-        const category: ManualCheckResult['status'] = 'connection_error'
-        storeManager.markModelRuntimeFailure(provider.id, model, actualModel, category, sanitizedError)
-        storeManager.updateAccount(account.id, {
-          lastRuntimeFailureAt: checkedAt,
-          lastRuntimeErrorCode: category,
-          lastRuntimeErrorMessage: sanitizedError,
-          runtimeFailureCount: (account.runtimeFailureCount || 0) + 1,
-        })
-        return {
-          success: false,
-          providerId: provider.id,
-          accountId: account.id,
-          model,
-          actualModel,
-          status: category,
-          errorCode: category,
-          errorMessage: sanitizedError,
-          checkedAt,
-        }
-      }
-    }
+    const healthCheckService = HealthCheckService.getInstance()
 
     type DashboardExportAccount = Omit<Account, 'credentials'> & { credentials?: Record<string, string> }
     type DashboardExportPayload = {
@@ -812,7 +683,7 @@ export class ProxyServer {
       const effectiveModels = storeManager.getEffectiveModels(providerId)
       const mapped = effectiveModels.find(item => item.displayName === modelId)
       const actualModel = mapped?.actualModelId || modelId
-      const result = await runMinimalProbe(provider, account, modelId, actualModel)
+      const result = await healthCheckService.runMinimalProbe(provider, account, modelId, actualModel)
       ctx.body = result
     }))
 
@@ -857,8 +728,12 @@ export class ProxyServer {
         return
       }
 
-      const result = await runMinimalProbe(provider, account, selectedModel.displayName, selectedModel.actualModelId)
+      const result = await healthCheckService.runMinimalProbe(provider, account, selectedModel.displayName, selectedModel.actualModelId)
       ctx.body = result
+    }))
+
+    this.router.get('/dashboard-api/providers/health-check-scheduler-status', withDashboardErrorHandling(async (ctx) => {
+      ctx.body = healthCheckService.getSchedulerStatus()
     }))
 
     this.router.post('/dashboard-api/providers/:providerId/models/check-all', withDashboardErrorHandling(async (ctx) => {
@@ -875,24 +750,7 @@ export class ProxyServer {
         ctx.body = { success: false, error: { code: 'account_not_found', message: `No active account for provider: ${providerId}` } }
         return
       }
-      const effectiveModels = storeManager.getEffectiveModels(providerId)
-      const results: ManualCheckResult[] = []
-      for (let index = 0; index < effectiveModels.length; index += 1) {
-        const model = effectiveModels[index]
-        const result = await runMinimalProbe(provider, account, model.displayName, model.actualModelId)
-        results.push(result)
-        if (index < effectiveModels.length - 1) {
-          await delay(700)
-        }
-      }
-      const available = results.filter(item => item.status === 'available').length
-      ctx.body = {
-        providerId,
-        checked: results.length,
-        available,
-        failed: results.length - available,
-        results,
-      }
+      ctx.body = await healthCheckService.checkAllModels(providerId)
     }))
 
     this.router.get('/dashboard-api/accounts', withDashboardErrorHandling(async (ctx) => {
@@ -1291,6 +1149,7 @@ export class ProxyServer {
     this.host = host || proxyStatusManager.getHost()
     
     sessionManager.initialize()
+    HealthCheckService.getInstance().startScheduler()
 
     return new Promise((resolve) => {
       try {
@@ -1333,6 +1192,7 @@ export class ProxyServer {
     }
     
     sessionManager.destroy()
+    HealthCheckService.getInstance().stopScheduler()
 
     return new Promise((resolve) => {
       this.server!.close((err) => {

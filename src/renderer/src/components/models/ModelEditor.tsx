@@ -67,10 +67,20 @@ export function ModelEditor({
     lastSyncError?: string
   } | null>(null)
 
+  const [schedulerStatus, setSchedulerStatus] = useState<{
+    enabled: boolean
+    minIntervalHours: number
+    maxIntervalHours: number
+    running: boolean
+    lastScheduledRunAt?: number
+    nextScheduledRunAt?: number
+  } | null>(null)
+
   useEffect(() => {
     if (open) {
       loadModels()
       loadSyncStatus()
+      loadSchedulerStatus()
     }
   }, [open, providerId])
 
@@ -114,6 +124,15 @@ export function ModelEditor({
     }
   }
 
+
+  const loadSchedulerStatus = async () => {
+    try {
+      const status = await window.electronAPI.providers.getHealthSchedulerStatus()
+      setSchedulerStatus(status)
+    } catch {
+      setSchedulerStatus(null)
+    }
+  }
   const handleSyncModels = async () => {
     setIsSyncing(true)
     try {
@@ -448,6 +467,15 @@ export function ModelEditor({
           ) : (
             <div className="space-y-6 mt-4">
               {renderModelTable(sortedModels)}
+
+
+              <div className="rounded-md border p-3 text-xs text-muted-foreground space-y-1">
+                <div className="font-medium text-foreground">Scheduled health checks</div>
+                <div>Status: {schedulerStatus?.enabled ? (schedulerStatus.running ? 'enabled' : 'enabled (idle)') : 'disabled'}</div>
+                <div>Interval: {schedulerStatus?.minIntervalHours ?? 12}-{schedulerStatus?.maxIntervalHours ?? 24} hours</div>
+                <div>Last scheduled run: {schedulerStatus?.lastScheduledRunAt ? new Date(schedulerStatus.lastScheduledRunAt).toLocaleString() : '-'}</div>
+                <div>Next scheduled run: {schedulerStatus?.nextScheduledRunAt ? new Date(schedulerStatus.nextScheduledRunAt).toLocaleString() : '-'}</div>
+              </div>
 
               <Alert>
                 <AlertTriangle className="h-4 w-4" />

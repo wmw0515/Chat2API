@@ -197,6 +197,19 @@ const providersAPI = {
     }>
   }> =>
     ipcRenderer.invoke(IpcChannels.PROVIDERS_CHECK_ALL_MODELS, providerId),
+  getHealthSchedulerStatus: (): Promise<{
+    enabled: boolean
+    minIntervalHours: number
+    maxIntervalHours: number
+    running: boolean
+    lastScheduledRunAt?: number
+    nextScheduledRunAt?: number
+    providerStates: Record<string, {
+      lastScheduledHealthCheckAt?: number
+      nextScheduledHealthCheckAt?: number
+    }>
+  }> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_HEALTH_SCHEDULER_STATUS),
 }
 
 const accountsAPI = {

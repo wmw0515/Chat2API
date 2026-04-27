@@ -181,6 +181,18 @@ interface ProvidersAPI {
       checkedAt: number
     }>
   }>
+  getHealthSchedulerStatus: () => Promise<{
+    enabled: boolean
+    minIntervalHours: number
+    maxIntervalHours: number
+    running: boolean
+    lastScheduledRunAt?: number
+    nextScheduledRunAt?: number
+    providerStates: Record<string, {
+      lastScheduledHealthCheckAt?: number
+      nextScheduledHealthCheckAt?: number
+    }>
+  }>
 }
 
 interface AccountsAPI {

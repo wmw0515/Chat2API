@@ -113,6 +113,8 @@ export function installBrowserApiShim() {
         request(`/providers/${providerId}/models/${encodeURIComponent(modelId)}/check`, { method: 'POST' }),
       checkAllModels: (providerId: string) =>
         request(`/providers/${providerId}/models/check-all`, { method: 'POST' }),
+      getHealthSchedulerStatus: () =>
+        request('/providers/health-check-scheduler-status'),
       duplicate: async () => {
         throw new Error('Duplicate provider is not supported in browser headless mode')
       },

@@ -4,6 +4,7 @@ import { createWindow, getMainWindow, loadUrl, loadFile, openDevTools } from './
 import { createTrayManager, TrayManager } from './tray/TrayManager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { UpdaterManager } from './updater'
+import { HealthCheckService } from './services/healthCheckService'
 
 // Prevent uncaught exceptions from crashing the app
 process.on('uncaughtException', (error) => {
@@ -127,6 +128,7 @@ function cleanup(): void {
   console.log('Application is exiting, performing cleanup...')
   const updaterManager = UpdaterManager.getInstance()
   updaterManager.destroy()
+  HealthCheckService.getInstance().stopScheduler()
 }
 
 export function restartApp(): void {
