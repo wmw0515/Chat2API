@@ -13,8 +13,6 @@ import {
   ToolCallState 
 } from '../utils/streamToolHandler'
 
-const MODEL_NAME = 'deepseek-chat'
-
 interface StreamChunk {
   p?: string
   v?: any
@@ -36,6 +34,7 @@ export class DeepSeekStreamHandler {
   private toolCallState: ToolCallState
   private webSearchEnabled: boolean
   private reasoningEffort: string | undefined
+  private doneHandled: boolean = false
 
   constructor(
     model: string,
@@ -77,6 +76,48 @@ export class DeepSeekStreamHandler {
       }],
       created: this.created,
     })}\n\n`
+  }
+
+  private normalizeContent(content: string, isSearchSilentModel: boolean): string {
+    const cleanedValue = content.replace(/FINISHED/g, '')
+    const filteredForSearch = cleanedValue.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+    return isSearchSilentModel
+      ? filteredForSearch.replace(/\[citation:(\d+)\]/g, '')
+      : filteredForSearch.replace(/\[citation:(\d+)\]/g, '[$1]')
+  }
+
+  private extractTextFromValue(value: any): string {
+    if (typeof value === 'string') {
+      return value
+    }
+    if (!value || typeof value !== 'object') {
+      return ''
+    }
+    if (Array.isArray(value)) {
+      return value.map(item => this.extractTextFromValue(item)).join('')
+    }
+
+    const directFields = ['content', 'text', 'answer']
+    let text = ''
+    for (const field of directFields) {
+      if (typeof value[field] === 'string') {
+        text += value[field]
+      }
+    }
+
+    if (Array.isArray(value.chunks)) {
+      text += value.chunks.map((chunk: any) => this.extractTextFromValue(chunk)).join('')
+    }
+
+    if (value.v !== undefined) {
+      text += this.extractTextFromValue(value.v)
+    }
+
+    if (value.value !== undefined) {
+      text += this.extractTextFromValue(value.value)
+    }
+
+    return text
   }
 
   async handleStream(stream: NodeJS.ReadableStream): Promise<NodeJS.ReadableStream> {
@@ -128,6 +169,8 @@ export class DeepSeekStreamHandler {
     isFoldModel: boolean,
     isSearchSilentModel: boolean
   ): void {
+    let handledFragments = false
+
     if (chunk.response_message_id && !this.messageId) {
       this.messageId = chunk.response_message_id
     }
@@ -140,6 +183,7 @@ export class DeepSeekStreamHandler {
       
       const fragments = chunk.v.response.fragments
       if (Array.isArray(fragments) && fragments.length > 0) {
+        handledFragments = true
         for (const fragment of fragments) {
           if (fragment.content) {
             const fragmentType = fragment.type
@@ -155,6 +199,7 @@ export class DeepSeekStreamHandler {
       }
     } else if (chunk.p === 'response/fragments') {
       if (Array.isArray(chunk.v)) {
+        handledFragments = true
         for (const fragment of chunk.v) {
           if (fragment.content) {
             const fragmentType = fragment.type
@@ -207,17 +252,8 @@ export class DeepSeekStreamHandler {
     }
 
     let content = ''
-    if (typeof chunk.v === 'string') {
-      content = chunk.v
-    } else if (Array.isArray(chunk.v)) {
-      content = chunk.v
-        .map((e: any) => {
-          if (Array.isArray(e.v)) {
-            return e.v.map((v: any) => v.content).join('')
-          }
-          return ''
-        })
-        .join('')
+    if (!handledFragments) {
+      content = this.extractTextFromValue(chunk.v)
     }
 
     if (!content) return
@@ -239,12 +275,7 @@ export class DeepSeekStreamHandler {
     isFoldModel: boolean,
     isSearchSilentModel: boolean
   ): void {
-    const cleanedValue = content.replace(/FINISHED/g, '')
-    // Always filter SEARCH keywords for thinking content
-    const filteredForSearch = cleanedValue.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
-    const processedContent = isSearchSilentModel
-      ? filteredForSearch.replace(/\[citation:(\d+)\]/g, '')
-      : filteredForSearch.replace(/\[citation:(\d+)\]/g, '[$1]')
+    const processedContent = this.normalizeContent(content, isSearchSilentModel)
 
     // For 'content' path, check for tool calls using processStreamContent
     if (path === 'content' || path === '') {
@@ -316,6 +347,11 @@ export class DeepSeekStreamHandler {
   }
 
   private handleDone(transStream: PassThrough, isFoldModel: boolean, isSearchSilentModel: boolean): void {
+    if (this.doneHandled) {
+      return
+    }
+    this.doneHandled = true
+
     // Flush tool call buffer before finishing
     const baseChunk = createBaseChunk(`${this.sessionId}@${this.messageId}`, this.model, this.created)
     const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'deepseek')
@@ -376,6 +412,7 @@ export class DeepSeekStreamHandler {
 
           try {
             const parsed = JSON.parse(data)
+            let handledFragments = false
             
             if (parsed.response_message_id && !messageId) {
               messageId = parsed.response_message_id
@@ -390,6 +427,7 @@ export class DeepSeekStreamHandler {
               
               const fragments = parsed.v.response.fragments
               if (Array.isArray(fragments) && fragments.length > 0) {
+                handledFragments = true
                 for (const fragment of fragments) {
                   if (fragment.content) {
                     let cleanedFragment = fragment.content.replace(/FINISHED/g, '')
@@ -404,6 +442,7 @@ export class DeepSeekStreamHandler {
               }
             } else if (parsed.p === 'response/fragments') {
               if (Array.isArray(parsed.v)) {
+                handledFragments = true
                 for (const fragment of parsed.v) {
                   if (fragment.content) {
                     let cleanedFragment = fragment.content.replace(/FINISHED/g, '')
@@ -439,28 +478,21 @@ export class DeepSeekStreamHandler {
 
             if (typeof parsed.v === 'object' && Array.isArray(parsed.v)) {
               parsed.v.forEach((e: any) => {
-                if (e.accumulated_token_usage && typeof e.v === 'number') {
+                if (e.p === 'accumulated_token_usage' && typeof e.v === 'number') {
                   accumulatedTokenUsage = e.v
                 }
-                if (Array.isArray(e.v)) {
-                  let cleanedValue = e.v.map((v: any) => v.content).join('').replace(/FINISHED/g, '')
-                  cleanedValue = cleanedValue.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
-                  if (currentPath === 'thinking') {
-                    accumulatedThinkingContent += cleanedValue
-                  } else if (currentPath === 'content') {
-                    accumulatedContent += cleanedValue
-                  }
+                if (e.p === 'response' && e.v && typeof e.v === 'object' && e.v.thinking_enabled === true) {
+                  currentPath = 'thinking'
                 }
               })
             }
 
-            if (typeof parsed.v === 'string') {
-              let cleanedValue = parsed.v.replace(/FINISHED/g, '')
-              cleanedValue = cleanedValue.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+            const extractedText = handledFragments ? '' : this.normalizeContent(this.extractTextFromValue(parsed.v), isSearchSilentModel)
+            if (extractedText) {
               if (currentPath === 'thinking') {
-                accumulatedThinkingContent += cleanedValue
-              } else if (currentPath === 'content') {
-                accumulatedContent += cleanedValue
+                accumulatedThinkingContent += extractedText
+              } else {
+                accumulatedContent += extractedText
               }
             }
           } catch {

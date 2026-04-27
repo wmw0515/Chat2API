@@ -72,6 +72,26 @@ const sanitizeHealthErrorMessage = (message: string): string => {
   return message.replace(SENSITIVE_FIELD_PATTERN, '[REDACTED]')
 }
 
+const extractAssistantContent = (body: any): string => {
+  const content = body?.choices?.[0]?.message?.content
+  if (typeof content === 'string') {
+    return content.trim()
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map(item => {
+        if (!item || typeof item !== 'object') return ''
+        if (item.type === 'text' && typeof item.text === 'string') {
+          return item.text
+        }
+        return ''
+      })
+      .join('')
+      .trim()
+  }
+  return ''
+}
+
 export class HealthCheckService {
   private static instance: HealthCheckService | null = null
 
@@ -401,6 +421,39 @@ export class HealthCheckService {
 
       const checkedAt = Date.now()
       if (result.success) {
+        const assistantContent = extractAssistantContent(result.body)
+        if (!assistantContent) {
+          const emptyContentError = 'Health check returned empty content'
+          this.applyFailureState(provider.id, model, actualModel, account, 'unknown_error', emptyContentError, checkedAt)
+          return {
+            success: false,
+            providerId: provider.id,
+            accountId: account.id,
+            model,
+            actualModel,
+            status: 'unknown_error',
+            errorCode: 'unknown_error',
+            errorMessage: emptyContentError,
+            checkedAt,
+          }
+        }
+
+        if (!assistantContent.toLowerCase().includes('ok')) {
+          const unexpectedContentError = 'Health check response missing expected "ok" marker'
+          this.applyFailureState(provider.id, model, actualModel, account, 'unknown_error', unexpectedContentError, checkedAt)
+          return {
+            success: false,
+            providerId: provider.id,
+            accountId: account.id,
+            model,
+            actualModel,
+            status: 'unknown_error',
+            errorCode: 'unknown_error',
+            errorMessage: unexpectedContentError,
+            checkedAt,
+          }
+        }
+
         storeManager.markModelRuntimeSuccess(provider.id, model, actualModel)
         storeManager.updateAccount(account.id, {
           healthStatus: 'active',
