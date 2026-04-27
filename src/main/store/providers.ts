@@ -19,6 +19,13 @@ export class ProviderManager {
   }
 
   /**
+   * Get Built-in Provider Configurations
+   */
+  static getBuiltin(): Provider[] {
+    return BUILTIN_PROVIDERS
+  }
+
+  /**
    * Get Provider By ID
    * @param id Provider ID
    */

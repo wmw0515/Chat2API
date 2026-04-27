@@ -5,6 +5,15 @@ type RequestOptions = {
 
 const apiBase = '/dashboard-api'
 
+function extractErrorMessage(payload: any, fallback: string): string {
+  if (!payload) return fallback
+  if (typeof payload === 'string') return payload
+  if (typeof payload?.message === 'string') return payload.message
+  if (typeof payload?.error === 'string') return payload.error
+  if (typeof payload?.error?.message === 'string') return payload.error.message
+  return fallback
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method: options.method || 'GET',
@@ -14,12 +23,24 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
 
+  const text = await response.text()
+  const payload = text ? (() => {
+    try {
+      return JSON.parse(text)
+    } catch {
+      return text
+    }
+  })() : null
+
   if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || `Request failed: ${response.status}`)
+    throw new Error(extractErrorMessage(payload, `Request failed: ${response.status}`))
   }
 
-  return response.json()
+  if (payload && typeof payload === 'object' && 'success' in payload && payload.success === false) {
+    throw new Error(extractErrorMessage(payload, 'Request failed'))
+  }
+
+  return payload as T
 }
 
 export function installBrowserApiShim() {
@@ -47,10 +68,27 @@ export function installBrowserApiShim() {
     providers: {
       getAll: () => request('/providers'),
       getBuiltin: () => request('/providers/builtin'),
-      checkAllStatus: async () => ({}),
+      add: (data: any) => request('/providers', { method: 'POST', body: data }),
+      update: (id: string, updates: any) => request(`/providers/${id}`, { method: 'PUT', body: updates }),
+      delete: (id: string) => request(`/providers/${id}`, { method: 'DELETE' }).then(() => true),
+      checkStatus: (providerId: string) => request(`/providers/${providerId}/check-status`, { method: 'POST' }),
+      checkAllStatus: () => request('/providers/check-all-status', { method: 'POST' }),
+      duplicate: async () => {
+        throw new Error('Duplicate provider is not supported in browser headless mode')
+      },
     },
     accounts: {
       getAll: () => request('/accounts'),
+      getById: (id: string, includeCredentials?: boolean) =>
+        request(`/accounts/${id}?includeCredentials=${includeCredentials ? '1' : '0'}`),
+      getByProvider: (providerId: string) => request(`/accounts?providerId=${encodeURIComponent(providerId)}`),
+      add: (data: any) => request('/accounts', { method: 'POST', body: data }),
+      update: (id: string, updates: any) => request(`/accounts/${id}`, { method: 'PUT', body: updates }),
+      delete: (id: string) => request(`/accounts/${id}`, { method: 'DELETE' }).then(() => true),
+      validate: async (accountId: string) =>
+        request<{ valid: boolean }>(`/accounts/${accountId}/validate`, { method: 'POST' }).then((result) => Boolean(result?.valid)),
+      validateToken: (providerId: string, credentials: Record<string, string>) =>
+        request('/accounts/validate-token', { method: 'POST', body: { providerId, credentials } }),
     },
     logs: {
       get: (options?: { limit?: number }) => request(`/logs?limit=${options?.limit || 50}`),
