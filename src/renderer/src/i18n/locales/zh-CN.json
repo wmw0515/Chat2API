@@ -58,9 +58,9 @@
     "daysAgo": "{{count}}天前"
   },
   "providers": {
-    "title": "供应商管理",
-    "subtitle": "管理您的 API 供应商配置和账户",
-    "addProvider": "添加供应商",
+    "title": "模型厂商",
+    "subtitle": "管理内置与自定义模型厂商配置和账号",
+    "addProvider": "添加厂商",
     "editProvider": "编辑供应商",
     "deleteProvider": "删除供应商",
     "duplicateProvider": "复制供应商",
@@ -252,7 +252,15 @@
     "authCookie": "Cookie",
     "authCookieDesc": "使用 Cookie 认证",
     "authOAuth": "OAuth",
-    "authOAuthDesc": "基于 OAuth 登录认证"
+    "authOAuthDesc": "基于 OAuth 登录认证",
+    "addCustomProvider": "添加自定义厂商",
+    "headers": "请求头（JSON）",
+    "editConfig": "编辑配置",
+    "resetDefaults": "恢复默认配置",
+    "overrideActive": "已覆盖配置",
+    "customProviderFormNotice": "每次都会从空白表单创建自定义厂商。为保证流程稳定，已隐藏预设下拉选择。",
+    "resetSuccess": "恢复成功",
+    "builtinDefaultsRestored": "内置厂商已恢复默认配置"
   },
   "loginGuide": {
     "getToken": "获取 {{provider}} 凭证",

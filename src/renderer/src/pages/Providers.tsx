@@ -11,6 +11,7 @@ import {
   ProviderCard,
   AddProviderDialog,
   CustomProviderForm,
+  BuiltinProviderConfigDialog,
   AccountList,
   AddAccountDialog,
   AccountDetail,
@@ -23,7 +24,7 @@ import type {
   BuiltinProviderConfig,
   CustomProviderFormData,
   Account,
-  ProviderPreset,
+  ProviderConfigOverride,
 } from '@/types/electron'
 import { FilterType, StatusFilter } from '@/components/providers/ProviderFilter'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -45,8 +46,9 @@ export function Providers() {
   
   const [showAddProviderDialog, setShowAddProviderDialog] = useState(false)
   const [showCustomProviderForm, setShowCustomProviderForm] = useState(false)
+  const [showBuiltinConfigDialog, setShowBuiltinConfigDialog] = useState(false)
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null)
-  const [providerPresets, setProviderPresets] = useState<ProviderPreset[]>([])
+  const [providerOverrideMap, setProviderOverrideMap] = useState<Record<string, boolean>>({})
   
   const [showAddAccountDialog, setShowAddAccountDialog] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
@@ -82,17 +84,24 @@ export function Providers() {
   }, [])
 
   const refreshProviderAndAccountData = async () => {
-    const [providersData, builtinData, accountsData, presetsData] = await Promise.all([
+    const [providersData, builtinData, accountsData] = await Promise.all([
       window.electronAPI.providers.getAll(),
       window.electronAPI.providers.getBuiltin(),
       window.electronAPI.accounts.getAll(),
-      window.electronAPI.providers.getPresets ? window.electronAPI.providers.getPresets() : Promise.resolve([]),
     ])
 
     useProvidersStore.getState().setProviders(providersData)
     useProvidersStore.getState().setBuiltinProviders(builtinData)
     useProvidersStore.getState().setAccounts(accountsData)
-    setProviderPresets((presetsData as ProviderPreset[]).filter((preset) => preset.type === 'custom'))
+    const builtinOverrides = await Promise.all(
+      providersData
+        .filter((provider) => provider.type === 'builtin')
+        .map(async (provider) => {
+          const override = await window.electronAPI.providers.getOverride(provider.id)
+          return [provider.id, Boolean(override)] as const
+        }),
+    )
+    setProviderOverrideMap(Object.fromEntries(builtinOverrides))
 
     const existingStatuses = useProvidersStore.getState().providerStatuses
     const statusMap: Record<string, ProviderStatus> = { ...existingStatuses }
@@ -168,7 +177,11 @@ export function Providers() {
     const provider = store.providers.find(p => p.id === id)
     if (provider) {
       setEditingProvider(provider)
-      setShowCustomProviderForm(true)
+      if (provider.type === 'builtin') {
+        setShowBuiltinConfigDialog(true)
+      } else {
+        setShowCustomProviderForm(true)
+      }
     }
   }
 
@@ -186,23 +199,6 @@ export function Providers() {
       toast({
         title: t('providers.deleteFailed'),
         description: error instanceof Error ? error.message : t('providers.cannotDeleteProvider'),
-        variant: 'destructive',
-      })
-    }
-  }
-
-  const handleDuplicateProvider = async (id: string) => {
-    try {
-      const newProvider = await window.electronAPI.providers.duplicate(id)
-      store.addProvider(newProvider)
-      toast({
-        title: t('providers.duplicateSuccess'),
-        description: t('providers.providerDuplicated'),
-      })
-    } catch (error) {
-      toast({
-        title: t('providers.duplicateFailed'),
-        description: t('providers.cannotDuplicateProvider'),
         variant: 'destructive',
       })
     }
@@ -335,31 +331,23 @@ export function Providers() {
 
   const handleCreateCustomProvider = () => {
     setShowAddProviderDialog(false)
+    setEditingProvider(null)
     setShowCustomProviderForm(true)
   }
 
   const handleCustomProviderFormSubmit = async (data: CustomProviderFormData) => {
     try {
       if (editingProvider) {
-        const updatePayload = editingProvider.type === 'builtin'
-          ? {
-              apiEndpoint: data.apiEndpoint,
-              chatPath: data.chatPath,
-              headers: data.headers,
-              description: data.description,
-              supportedModels: data.supportedModels,
-              credentialFields: data.credentialFields,
-            }
-          : {
-              name: data.name,
-              authType: data.authType,
-              apiEndpoint: data.apiEndpoint,
-              chatPath: data.chatPath,
-              headers: data.headers,
-              description: data.description,
-              supportedModels: data.supportedModels,
-              credentialFields: data.credentialFields,
-            }
+        const updatePayload = {
+          name: data.name,
+          authType: data.authType,
+          apiEndpoint: data.apiEndpoint,
+          chatPath: data.chatPath,
+          headers: data.headers,
+          description: data.description,
+          supportedModels: data.supportedModels,
+          credentialFields: data.credentialFields,
+        }
         const updated = await window.electronAPI.providers.update(editingProvider.id, updatePayload as any)
       if (updated) {
           await refreshProviderAndAccountData()
@@ -692,7 +680,10 @@ export function Providers() {
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         onRefresh={handleCheckAllStatus}
-        onAddProvider={() => setShowAddProviderDialog(true)}
+        onAddProvider={() => {
+          setEditingProvider(null)
+          setShowAddProviderDialog(true)
+        }}
         isRefreshing={isRefreshing}
         stats={stats}
       />
@@ -720,9 +711,17 @@ export function Providers() {
                 onToggle={handleToggleProvider}
                 onEdit={handleEditProvider}
                 onDelete={handleDeleteProvider}
-                onDuplicate={handleDuplicateProvider}
                 onCheckStatus={handleCheckProviderStatus}
                 onManageAccounts={handleManageAccounts}
+                hasOverride={provider.type === 'builtin' ? providerOverrideMap[provider.id] : false}
+                onResetDefaults={provider.type === 'builtin' ? async (providerId) => {
+                  await window.electronAPI.providers.deleteOverride(providerId)
+                  await refreshProviderAndAccountData()
+                  toast({
+                    title: t('providers.resetSuccess'),
+                    description: t('providers.builtinDefaultsRestored'),
+                  })
+                } : undefined}
                 onUpdateModels={handleUpdateModels}
                 onManageModels={handleManageModels}
               />
@@ -757,26 +756,45 @@ export function Providers() {
           supportedModels: editingProvider.supportedModels || [],
           credentialFields: editingProvider.credentialFields || [],
         } : undefined}
-        builtinProviders={store.builtinProviders}
-        customPresets={providerPresets}
-        onResetBuiltinOverride={async (providerId) => {
-          await window.electronAPI.providers.deleteOverride(providerId)
-          await refreshProviderAndAccountData()
+      />
+
+      <BuiltinProviderConfigDialog
+        open={showBuiltinConfigDialog}
+        provider={editingProvider?.type === 'builtin' ? editingProvider : null}
+        hasOverride={editingProvider ? providerOverrideMap[editingProvider.id] : false}
+        onOpenChange={(open) => {
+          setShowBuiltinConfigDialog(open)
+          if (!open) setEditingProvider(null)
         }}
-        onSaveAsPreset={async (data) => {
-          await window.electronAPI.providers.createPreset({
-            presetId: `preset_${Date.now()}`,
-            name: data.name,
-            type: 'custom',
-            authType: data.authType,
-            apiEndpoint: data.apiEndpoint,
-            chatPath: data.chatPath,
-            headers: data.headers,
-            description: data.description,
-            supportedModels: data.supportedModels,
-            credentialFields: data.credentialFields,
-          } as any)
+        onSubmit={async (override: ProviderConfigOverride) => {
+          if (!editingProvider) return
+          try {
+            await window.electronAPI.providers.updateOverride(editingProvider.id, override)
+            await refreshProviderAndAccountData()
+            setShowBuiltinConfigDialog(false)
+            setEditingProvider(null)
+            toast({
+              title: t('providers.updateSuccess'),
+              description: t('providers.providerConfigUpdated'),
+            })
+          } catch (error) {
+            toast({
+              title: t('providers.updateFailed'),
+              description: error instanceof Error ? error.message : t('providers.operationFailed'),
+              variant: 'destructive',
+            })
+          }
+        }}
+        onReset={async () => {
+          if (!editingProvider) return
+          await window.electronAPI.providers.deleteOverride(editingProvider.id)
           await refreshProviderAndAccountData()
+          setShowBuiltinConfigDialog(false)
+          setEditingProvider(null)
+          toast({
+            title: t('providers.resetSuccess'),
+            description: t('providers.builtinDefaultsRestored'),
+          })
         }}
       />
 

@@ -14,7 +14,6 @@ import {
   MoreVertical, 
   Edit, 
   Trash2, 
-  Copy, 
   RefreshCw, 
   Users,
   Plus,
@@ -54,9 +53,10 @@ interface ProviderCardProps {
   onToggle: (id: string, enabled: boolean) => void
   onEdit: (id: string) => void
   onDelete: (id: string) => void
-  onDuplicate: (id: string) => void
   onCheckStatus: (id: string) => void
   onManageAccounts: (id: string) => void
+  hasOverride?: boolean
+  onResetDefaults?: (id: string) => void
   onUpdateModels?: (id: string) => void
   onManageModels?: (id: string) => void
   className?: string
@@ -76,9 +76,10 @@ export function ProviderCard({
   onToggle,
   onEdit,
   onDelete,
-  onDuplicate,
   onCheckStatus,
   onManageAccounts,
+  hasOverride = false,
+  onResetDefaults,
   onUpdateModels,
   onManageModels,
   className,
@@ -129,6 +130,16 @@ export function ProviderCard({
               {isBuiltin && (
                 <Badge variant="outline" className="text-xs">
                   {t('providers.builtin')}
+                </Badge>
+              )}
+              {!isBuiltin && (
+                <Badge variant="secondary" className="text-xs">
+                  {t('providers.custom')}
+                </Badge>
+              )}
+              {isBuiltin && hasOverride && (
+                <Badge variant="secondary" className="text-xs">
+                  {t('providers.overrideActive')}
                 </Badge>
               )}
             </CardTitle>
@@ -182,22 +193,24 @@ export function ProviderCard({
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => onEdit(provider.id)}>
                 <Edit className="mr-2 h-4 w-4" />
-                {t('providers.editProvider')}
+                {isBuiltin ? t('providers.editConfig') : t('providers.editProvider')}
               </DropdownMenuItem>
-              {!isBuiltin && (
-                <DropdownMenuItem onClick={() => onDuplicate(provider.id)}>
-                  <Copy className="mr-2 h-4 w-4" />
-                  {t('providers.duplicateProvider')}
+              {isBuiltin && hasOverride && onResetDefaults && (
+                <DropdownMenuItem onClick={() => onResetDefaults(provider.id)}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  {t('providers.resetDefaults')}
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
-              <DropdownMenuItem 
-                onClick={() => onDelete(provider.id)}
-                className="text-destructive"
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                {t('providers.deleteProvider')}
-              </DropdownMenuItem>
+              {!isBuiltin && (
+                <DropdownMenuItem 
+                  onClick={() => onDelete(provider.id)}
+                  className="text-destructive"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {t('providers.deleteProvider')}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
