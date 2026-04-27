@@ -47,7 +47,7 @@ export class ProxyServer {
     this.app.use(async (ctx, next) => {
       ctx.set('Access-Control-Allow-Origin', '*')
       ctx.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-      ctx.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+      ctx.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Dashboard-Token')
       ctx.set('Access-Control-Max-Age', '86400')
 
       if (ctx.method === 'OPTIONS') {
@@ -63,6 +63,34 @@ export class ProxyServer {
       formLimit: '50mb',
       textLimit: '50mb',
     }))
+
+
+    this.app.use(async (ctx, next) => {
+      const dashboardToken = process.env.CHAT2API_DASHBOARD_TOKEN
+      if (!dashboardToken || !ctx.path.startsWith('/dashboard-api/')) {
+        await next()
+        return
+      }
+
+      const authHeader = ctx.get('Authorization') || ''
+      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
+      const headerToken = ctx.get('X-Dashboard-Token') || ''
+      const providedToken = bearerToken || headerToken
+
+      if (providedToken !== dashboardToken) {
+        ctx.status = 401
+        ctx.body = {
+          success: false,
+          error: {
+            code: 'dashboard_auth_required',
+            message: 'Dashboard token is required',
+          },
+        }
+        return
+      }
+
+      await next()
+    })
 
     // API Key validation middleware
     this.app.use(async (ctx, next) => {
