@@ -1,0 +1,37 @@
+{
+  "version": "template-v1",
+  "description": "Provider compatibility planning template (documentation only; not runtime config)",
+  "providers": [
+    {
+      "providerName": "Example Provider",
+      "providerId": "example",
+      "authType": "jwt",
+      "expectedCredentialFields": [
+        "token"
+      ],
+      "providerType": "builtin",
+      "expectedModels": [
+        "Example-Chat",
+        "Example-Reasoning"
+      ],
+      "validationMethod": [
+        "manual account validation",
+        "GET /v1/models",
+        "POST /v1/chat/completions (non-stream)",
+        "POST /v1/chat/completions (stream, if supported)"
+      ],
+      "knownLimitations": [
+        "Session tokens may expire without notice",
+        "Model catalog may change upstream"
+      ],
+      "toolFunctionCallingSupport": "provider-dependent",
+      "openWebUiNormalChat": "suitable",
+      "hermesOpenClawToolUse": "conditional",
+      "recommendedHealthStatusNotes": [
+        "invalid or expired auth => unhealthy",
+        "partial feature/model failure => degraded",
+        "not yet validated => unknown"
+      ]
+    }
+  ]
+}
