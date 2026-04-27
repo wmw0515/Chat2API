@@ -14,11 +14,9 @@ import { proxyStatusManager } from '../proxy/status'
 import { sessionManager } from '../proxy/sessionManager'
 import { TrayManager } from '../tray/TrayManager'
 import { ConfigManager } from '../store/config'
+import { HealthCheckService } from '../services/healthCheckService'
 import { generateManagementSecret } from '../proxy/middleware/managementAuth'
 import { UpdaterManager } from '../updater'
-import { requestForwarder } from '../proxy/forwarder'
-import { classifyProviderError, sanitizeRuntimeErrorMessage } from '../proxy/utils/runtimeError'
-import type { ChatCompletionRequest, ProxyContext } from '../proxy/types'
 import type { Provider, Account, ProxyStatus, ProviderCheckResult, OAuthResult, AuthType, CredentialField, LogLevel, LogEntry, ProviderVendor, AppConfig, ValidationResult, ProviderPreset, ProviderConfigOverride } from '../../shared/types'
 import type { SystemPrompt, SessionConfig, SessionRecord, ManagementApiConfig } from '../store/types'
 import type { ProviderType } from '../oauth/types'
@@ -87,111 +85,8 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     }
   }
 
-  const HEALTH_CHECK_TIMEOUT_MS = 30_000
-  const HEALTH_CHECK_PROMPT = 'Please reply only: ok'
-  const delay = async (ms: number): Promise<void> => {
-    await new Promise(resolve => setTimeout(resolve, ms))
-  }
-
-  type RuntimeStatus = 'available' | 'credential_error' | 'model_invalid' | 'connection_error' | 'unknown_error'
-  type ManualCheckResult = {
-    success: boolean
-    providerId: string
-    accountId: string
-    model: string
-    actualModel: string
-    status: RuntimeStatus
-    errorCode?: string
-    errorMessage?: string
-    checkedAt: number
-  }
-
-  const runMinimalProbe = async (provider: any, account: any, model: string, actualModel: string): Promise<ManualCheckResult> => {
-    const startedAt = Date.now()
-    const request: ChatCompletionRequest = {
-      model,
-      messages: [{ role: 'user', content: HEALTH_CHECK_PROMPT }],
-      stream: false,
-      max_tokens: 8,
-      temperature: 0,
-    }
-    const context: ProxyContext = {
-      requestId: `healthchk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-      providerId: provider.id,
-      accountId: account.id,
-      model,
-      actualModel,
-      startTime: startedAt,
-      isStream: false,
-      clientIP: 'dashboard-ipc',
-    }
-
-    try {
-      const result = await Promise.race([
-        requestForwarder.forwardChatCompletion(request, account, provider, actualModel, context),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Health check timeout')), HEALTH_CHECK_TIMEOUT_MS)),
-      ])
-      const checkedAt = Date.now()
-      if (result.success) {
-        storeManager.markModelRuntimeSuccess(provider.id, model, actualModel)
-        storeManager.updateAccount(account.id, {
-          healthStatus: 'active',
-          lastRuntimeSuccessAt: checkedAt,
-          lastRuntimeErrorCode: undefined,
-          lastRuntimeErrorMessage: undefined,
-        })
-        return { success: true, providerId: provider.id, accountId: account.id, model, actualModel, status: 'available', checkedAt }
-      }
-
-      const sanitizedError = sanitizeRuntimeErrorMessage(result.error || 'Health check failed')
-      const category = classifyProviderError(provider.id, { status: result.status, message: sanitizedError })
-      storeManager.markModelRuntimeFailure(provider.id, model, actualModel, category, sanitizedError)
-      const runtimeFailureUpdates = {
-        lastRuntimeFailureAt: checkedAt,
-        lastRuntimeErrorCode: category,
-        lastRuntimeErrorMessage: sanitizedError,
-        runtimeFailureCount: (account.runtimeFailureCount || 0) + 1,
-      }
-      if (category === 'credential_error') {
-        storeManager.updateAccount(account.id, { ...runtimeFailureUpdates, healthStatus: 'invalid' })
-      } else {
-        storeManager.updateAccount(account.id, runtimeFailureUpdates)
-      }
-      return {
-        success: false,
-        providerId: provider.id,
-        accountId: account.id,
-        model,
-        actualModel,
-        status: category,
-        errorCode: category,
-        errorMessage: sanitizedError,
-        checkedAt,
-      }
-    } catch (error) {
-      const checkedAt = Date.now()
-      const sanitizedError = sanitizeRuntimeErrorMessage(error instanceof Error ? error.message : 'Health check failed')
-      const category: RuntimeStatus = 'connection_error'
-      storeManager.markModelRuntimeFailure(provider.id, model, actualModel, category, sanitizedError)
-      storeManager.updateAccount(account.id, {
-        lastRuntimeFailureAt: checkedAt,
-        lastRuntimeErrorCode: category,
-        lastRuntimeErrorMessage: sanitizedError,
-        runtimeFailureCount: (account.runtimeFailureCount || 0) + 1,
-      })
-      return {
-        success: false,
-        providerId: provider.id,
-        accountId: account.id,
-        model,
-        actualModel,
-        status: category,
-        errorCode: category,
-        errorMessage: sanitizedError,
-        checkedAt,
-      }
-    }
-  }
+  const healthCheckService = HealthCheckService.getInstance()
+  healthCheckService.startScheduler()
 
   ipcMain.handle(IpcChannels.PROXY_START, async (_, port?: number): Promise<boolean> => {
     try {
@@ -680,57 +575,15 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   })
 
   ipcMain.handle(IpcChannels.PROVIDERS_CHECK_MODEL, async (_, providerId: string, modelId: string) => {
-    const provider = ProviderManager.getById(providerId)
-    if (!provider) {
-      throw new Error(`Provider not found: ${providerId}`)
-    }
-    const account = AccountManager.getAvailable(providerId).find(item => item.status === 'active')
-    if (!account) {
-      return {
-        success: false,
-        providerId,
-        accountId: '',
-        model: modelId,
-        actualModel: modelId,
-        status: 'unknown_error' as const,
-        errorCode: 'no_available_account',
-        errorMessage: 'No active account with credentials available for health check',
-        checkedAt: Date.now(),
-      }
-    }
-    const effectiveModels = storeManager.getEffectiveModels(providerId)
-    const mapped = effectiveModels.find(item => item.displayName === modelId)
-    const actualModel = mapped?.actualModelId || modelId
-    return runMinimalProbe(provider, account, modelId, actualModel)
+    return healthCheckService.checkModel(providerId, modelId)
   })
 
   ipcMain.handle(IpcChannels.PROVIDERS_CHECK_ALL_MODELS, async (_, providerId: string) => {
-    const provider = ProviderManager.getById(providerId)
-    if (!provider) {
-      throw new Error(`Provider not found: ${providerId}`)
-    }
-    const account = AccountManager.getAvailable(providerId).find(item => item.status === 'active')
-    if (!account) {
-      throw new Error(`No active account for provider: ${providerId}`)
-    }
-    const effectiveModels = storeManager.getEffectiveModels(providerId)
-    const results = []
-    for (let index = 0; index < effectiveModels.length; index += 1) {
-      const model = effectiveModels[index]
-      const result = await runMinimalProbe(provider, account, model.displayName, model.actualModelId)
-      results.push(result)
-      if (index < effectiveModels.length - 1) {
-        await delay(700)
-      }
-    }
-    const available = results.filter(item => item.status === 'available').length
-    return {
-      providerId,
-      checked: results.length,
-      available,
-      failed: results.length - available,
-      results,
-    }
+    return healthCheckService.checkAllModels(providerId)
+  })
+
+  ipcMain.handle(IpcChannels.PROVIDERS_GET_HEALTH_SCHEDULER_STATUS, async () => {
+    return healthCheckService.getSchedulerStatus()
   })
 
   ipcMain.handle(IpcChannels.ACCOUNTS_GET_ALL, async (_, includeCredentials?: boolean): Promise<Account[]> => {
@@ -809,39 +662,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   })
 
   ipcMain.handle(IpcChannels.ACCOUNTS_CHECK, async (_, accountId: string) => {
-    const account = AccountManager.getById(accountId, true)
-    if (!account) {
-      throw new Error(`Account not found: ${accountId}`)
-    }
-    const provider = ProviderManager.getById(account.providerId)
-    if (!provider) {
-      throw new Error(`Provider not found: ${account.providerId}`)
-    }
-    const effectiveModels = storeManager.getEffectiveModels(provider.id)
-    const sourcePriority: Record<'manual' | 'static' | 'discovered', number> = {
-      manual: 0,
-      static: 1,
-      discovered: 2,
-    }
-    const selectedModel = [...effectiveModels].sort((a, b) => {
-      const sourceA = a.source || 'static'
-      const sourceB = b.source || 'static'
-      return sourcePriority[sourceA] - sourcePriority[sourceB]
-    })[0]
-    if (!selectedModel) {
-      return {
-        success: false,
-        providerId: provider.id,
-        accountId: account.id,
-        model: '',
-        actualModel: '',
-        status: 'unknown_error' as const,
-        errorCode: 'no_model_available',
-        errorMessage: 'No effective model available for health check',
-        checkedAt: Date.now(),
-      }
-    }
-    return runMinimalProbe(provider, account, selectedModel.displayName, selectedModel.actualModelId)
+    return healthCheckService.checkAccount(accountId)
   })
 
   ipcMain.handle(IpcChannels.ACCOUNTS_GET_CREDITS, async (_, accountId: string): Promise<{

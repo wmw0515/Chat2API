@@ -36,6 +36,7 @@ export const IpcChannels = {
   PROVIDERS_RESET_MODELS: 'providers:resetModels',
   PROVIDERS_CHECK_MODEL: 'providers:checkModel',
   PROVIDERS_CHECK_ALL_MODELS: 'providers:checkAllModels',
+  PROVIDERS_GET_HEALTH_SCHEDULER_STATUS: 'providers:getHealthSchedulerStatus',
   PROVIDERS_GET_PRESETS: 'providers:getPresets',
   PROVIDERS_CREATE_PRESET: 'providers:createPreset',
   PROVIDERS_UPDATE_PRESET: 'providers:updatePreset',
