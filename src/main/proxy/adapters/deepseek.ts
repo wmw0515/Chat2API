@@ -73,7 +73,7 @@ interface DeepSeekCompletionPayload {
   thinking_enabled: boolean
   parent_message_id: null
   preprompt: false
-  model_type?: 'expert'
+  model_type: 'expert'
 }
 
 const tokenCache = new Map<string, TokenInfo>()
@@ -127,12 +127,6 @@ export class DeepSeekAdapter {
     })
     this.token = account.credentials.token || account.credentials.apiKey || account.credentials.refreshToken || ''
     console.log('[DeepSeek] Token configured:', Boolean(this.token))
-  }
-
-  private resolveModelType(thinkingEnabled: boolean): 'expert' | undefined {
-    // Only set model_type for expert/thinking mode.
-    // Keep non-thinking/fast mode conservative until browser payload is verified.
-    return thinkingEnabled ? 'expert' : undefined
   }
 
   private async acquireToken(): Promise<string> {
@@ -406,37 +400,11 @@ ${message.content || ''}
 
     let prompt = this.messagesToPrompt(messages, false)
 
-    // Use request parameters for mode control (OpenAI compatible)
-    let searchEnabled = false
-    let thinkingEnabled = false
-
-    if (request.web_search) {
-      searchEnabled = true
-      console.log('[DeepSeek] Web search enabled')
-    }
-
-    if (request.reasoning_effort) {
-      thinkingEnabled = true
-      console.log('[DeepSeek] Reasoning mode enabled, effort:', request.reasoning_effort)
-    }
-
-    // Fallback: check model name for backward compatibility
-    const modelLower = request.model.toLowerCase()
-    if (!searchEnabled && modelLower.includes('search')) {
-      searchEnabled = true
-      console.log('[DeepSeek] Web search enabled (from model name)')
-    }
-    if (!thinkingEnabled && (modelLower.includes('r1') || modelLower.includes('think'))) {
-      thinkingEnabled = true
-      console.log('[DeepSeek] Reasoning mode enabled (from model name)')
-    }
-    // Also check prompt for deep thinking keyword
-    if (!thinkingEnabled && prompt.includes('deep thinking')) {
-      thinkingEnabled = true
-      console.log('[DeepSeek] Reasoning mode enabled (from prompt)')
-    }
-
-    const modelType = this.resolveModelType(thinkingEnabled)
+    // DeepSeek web profile is mode-based (not model-version-based).
+    // Chat2API default profile is always: Expert + Thinking + Web Search.
+    const searchEnabled = true
+    const thinkingEnabled = true
+    const modelType: 'expert' = 'expert'
     const payload: DeepSeekCompletionPayload = {
       chat_session_id: sessionId,
       prompt,
@@ -445,7 +413,7 @@ ${message.content || ''}
       thinking_enabled: thinkingEnabled,
       parent_message_id: null,
       preprompt: false,
-      ...(modelType ? { model_type: modelType } : {}),
+      model_type: modelType,
     }
 
     console.log('[DeepSeek] Completion mode:', {

@@ -27,14 +27,12 @@ export const deepseekConfig: BuiltinProviderConfig = {
     'X-Client-Version': '1.6.1',
   },
   enabled: true,
-  description: 'DeepSeek AI assistant, supports deep thinking and web search',
+  description: 'DeepSeek web is mode-based. Chat2API uses Expert mode + deep thinking + web search by default.',
   supportedModels: [
-    'DeepSeek-V3.2',
-    'DeepSeek-Search',
-    'DeepSeek-R1',
-    'DeepSeek-R1-Search',
+    'DeepSeek',
   ],
   modelMappings: {
+    'DeepSeek': 'deepseek-chat',
     'DeepSeek-V3.2': 'deepseek-chat',
     'DeepSeek-Search': 'deepseek-chat',
     'DeepSeek-R1': 'deepseek-chat',

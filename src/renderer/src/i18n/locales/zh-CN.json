@@ -286,11 +286,12 @@
   },
   "deepseek": {
     "name": "DeepSeek",
-    "description": "DeepSeek 智能对话助手，支持深度思考和联网搜索",
+    "description": "DeepSeek 网页端按模式调用。Chat2API 默认使用专家模式 + 深度思考 + 智能搜索。",
     "userToken": "用户 Token",
     "userTokenPlaceholder": "请输入 DeepSeek 用户 Token",
     "userTokenHelp": "从 DeepSeek 网页请求头 Authorization: Bearer 后复制 token，或从 Local Storage 中找到对应 token，只填写 token 本身，不要包含 Bearer、引号或 JSON 外壳。",
     "models": {
+      "DeepSeek": "DeepSeek",
       "DeepSeek-V3.2": "DeepSeek V3.2 - 标准对话",
       "DeepSeek-Search": "DeepSeek Search - 联网搜索",
       "DeepSeek-R1": "DeepSeek R1 - 深度思考",

@@ -533,13 +533,25 @@ export class ProxyServer {
         ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
         return
       }
-      ctx.body = await ProviderChecker.checkProviderStatus(provider)
+      const result = await ProviderChecker.checkProviderStatus(provider)
+      ProviderManager.update(provider.id, {
+        status: result.status,
+        lastStatusCheck: Date.now(),
+      })
+      ctx.body = result
     }))
 
     this.router.post('/dashboard-api/providers/check-all-status', withDashboardErrorHandling(async (ctx) => {
       const providers = ProviderManager.getAll()
       const entries = await Promise.all(
-        providers.map(async (provider) => [provider.id, await ProviderChecker.checkProviderStatus(provider)] as const),
+        providers.map(async (provider) => {
+          const result = await ProviderChecker.checkProviderStatus(provider)
+          ProviderManager.update(provider.id, {
+            status: result.status,
+            lastStatusCheck: Date.now(),
+          })
+          return [provider.id, result] as const
+        }),
       )
       ctx.body = Object.fromEntries(entries)
     }))

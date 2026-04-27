@@ -87,7 +87,7 @@ export function ProviderCard({
   const { t } = useTranslation()
   const isBuiltin = provider.type === 'builtin'
   const icon = providerIcons[provider.id]
-  const currentStatus = provider.status || status || 'unknown'
+  const currentStatus = status || provider.status || 'unknown'
 
   const statusTexts: Record<ProviderStatus, string> = {
     online: t('providers.online'),
