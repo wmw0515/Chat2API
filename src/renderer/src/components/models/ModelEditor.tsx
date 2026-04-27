@@ -303,7 +303,7 @@ export function ModelEditor({
     } catch (error) {
       toast({
         title: t('common.error'),
-        description: error instanceof Error ? error.message : 'Check failed',
+        description: error instanceof Error ? error.message : t('modelEditor.checkFailed'),
         variant: 'destructive',
       })
     } finally {
@@ -319,12 +319,15 @@ export function ModelEditor({
       setModelsLastUpdated(Date.now())
       toast({
         title: t('common.success'),
-        description: `已检测 ${result.checked} 个模型，可用 ${result.available} 个`,
+        description: t('modelEditor.checkAllResult', {
+          checked: result.checked,
+          available: result.available,
+        }),
       })
     } catch (error) {
       toast({
         title: t('common.error'),
-        description: error instanceof Error ? error.message : 'Check failed',
+        description: error instanceof Error ? error.message : t('modelEditor.checkFailed'),
         variant: 'destructive',
       })
     } finally {
@@ -364,16 +367,15 @@ export function ModelEditor({
     }
 
     return (
-      <div className="border rounded-lg">
-        <Table>
+      <div className="border rounded-lg overflow-x-auto">
+        <Table className="min-w-[980px]">
           <TableHeader>
             <TableRow>
-              <TableHead>{t('modelEditor.displayName')}</TableHead>
-              <TableHead>{t('modelEditor.actualModelId')}</TableHead>
-              <TableHead>{t('modelEditor.healthStatus')}</TableHead>
-              <TableHead>{t('modelEditor.lastCheckedAt')}</TableHead>
-              <TableHead>{t('modelEditor.lastErrorMessage')}</TableHead>
-              <TableHead>{t('modelEditor.source')}</TableHead>
+              <TableHead className="w-[220px]">{t('modelEditor.displayName')}</TableHead>
+              <TableHead className="w-[280px]">{t('modelEditor.actualModelId')}</TableHead>
+              <TableHead className="w-[120px]">{t('modelEditor.healthStatus')}</TableHead>
+              <TableHead className="w-[180px]">{t('modelEditor.lastCheckedAt')}</TableHead>
+              <TableHead className="w-[240px]">{t('modelEditor.lastErrorMessage')}</TableHead>
               <TableHead className="w-[180px]">{t('modelEditor.actions')}</TableHead>
             </TableRow>
           </TableHeader>
@@ -384,16 +386,21 @@ export function ModelEditor({
 
               return (
                 <TableRow key={model.displayName}>
-                  <TableCell>
-                    <code className="text-sm">{model.displayName}</code>
+                  <TableCell className="max-w-[220px]">
+                    <code className="block text-sm whitespace-nowrap truncate" title={model.displayName}>
+                      {model.displayName}
+                    </code>
                   </TableCell>
-                  <TableCell>
-                    <code className="text-sm">
+                  <TableCell className="max-w-[280px]">
+                    <code
+                      className="block text-sm whitespace-nowrap truncate"
+                      title={showBoth ? model.actualModelId : model.displayName}
+                    >
                       {showBoth ? model.actualModelId : model.displayName}
                     </code>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className="text-xs">
+                    <Badge variant="secondary" className="text-xs whitespace-nowrap inline-flex">
                       {formatHealthStatus(model.runtimeHealth?.status)}
                     </Badge>
                   </TableCell>
@@ -404,11 +411,6 @@ export function ModelEditor({
                     {model.runtimeHealth?.lastErrorMessage || '-'}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="text-xs">
-                      {model.source ? t(`modelEditor.source.${model.source}`) : t('modelEditor.source.static')}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
                     <div className="flex items-center gap-1">
                       <Button
                         variant="outline"
@@ -417,7 +419,7 @@ export function ModelEditor({
                         disabled={Boolean(checkingModel) || isCheckingAllModels}
                       >
                         {checkingModel === model.displayName ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
-                        Check
+                        {t('modelEditor.check')}
                       </Button>
                       <Button
                         variant="ghost"
@@ -450,7 +452,7 @@ export function ModelEditor({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-6xl max-h-[85vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               {t('modelEditor.title', { name: providerName })}
@@ -465,16 +467,16 @@ export function ModelEditor({
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            <div className="space-y-6 mt-4">
+            <div className="space-y-6 mt-4 overflow-y-auto pr-1">
               {renderModelTable(sortedModels)}
 
 
               <div className="rounded-md border p-3 text-xs text-muted-foreground space-y-1">
-                <div className="font-medium text-foreground">Scheduled health checks</div>
-                <div>Status: {schedulerStatus?.enabled ? (schedulerStatus.running ? 'enabled' : 'enabled (idle)') : 'disabled'}</div>
-                <div>Interval: {schedulerStatus?.minIntervalHours ?? 12}-{schedulerStatus?.maxIntervalHours ?? 24} hours</div>
-                <div>Last scheduled run: {schedulerStatus?.lastScheduledRunAt ? new Date(schedulerStatus.lastScheduledRunAt).toLocaleString() : '-'}</div>
-                <div>Next scheduled run: {schedulerStatus?.nextScheduledRunAt ? new Date(schedulerStatus.nextScheduledRunAt).toLocaleString() : '-'}</div>
+                <div className="font-medium text-foreground">{t('modelEditor.scheduledHealthChecks')}</div>
+                <div>{t('modelEditor.status')}: {schedulerStatus?.enabled ? (schedulerStatus.running ? t('modelEditor.statusEnabled') : t('modelEditor.statusEnabledIdle')) : t('modelEditor.statusDisabled')}</div>
+                <div>{t('modelEditor.interval')}: {schedulerStatus?.minIntervalHours ?? 12}-{schedulerStatus?.maxIntervalHours ?? 24} {t('modelEditor.hours')}</div>
+                <div>{t('modelEditor.lastScheduledRun')}: {schedulerStatus?.lastScheduledRunAt ? new Date(schedulerStatus.lastScheduledRunAt).toLocaleString() : '-'}</div>
+                <div>{t('modelEditor.nextScheduledRun')}: {schedulerStatus?.nextScheduledRunAt ? new Date(schedulerStatus.nextScheduledRunAt).toLocaleString() : '-'}</div>
               </div>
 
               <Alert>
@@ -529,7 +531,7 @@ export function ModelEditor({
                   disabled={isLoading || isCheckingAllModels || Boolean(checkingModel)}
                 >
                   {isCheckingAllModels ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                  Check all models
+                  {t('modelEditor.checkAllModels')}
                 </Button>
               </div>
               <Button
