@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { AuthType, CredentialField } from '@/types/electron'
 
@@ -103,14 +102,13 @@ export function CustomProviderForm({ open, onOpenChange, onSubmit, initialData }
           <DialogDescription>{t('providers.createCustomProviderDesc')}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2 max-h-[500px] overflow-auto">
-          <Alert><AlertDescription>{t('providers.customProviderFormNotice')}</AlertDescription></Alert>
-          <div><Label>{t('providers.providerName')}</Label><Input value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />{errors.name && <p className="text-destructive text-xs">{errors.name}</p>}</div>
+          <div><Label>{t('providers.providerName')}</Label><Input value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder={t('providers.providerNamePlaceholder')} />{errors.name && <p className="text-destructive text-xs">{errors.name}</p>}</div>
           <div><Label>{t('providers.authType')}</Label><Select value={formData.authType} onValueChange={(v: AuthType) => setFormData({ ...formData, authType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{authTypeOptions.map((a) => <SelectItem key={a} value={a}>{t(authLabelKey[a])}</SelectItem>)}</SelectContent></Select></div>
-          <div><Label>{t('providers.apiEndpoint')}</Label><Input value={formData.apiEndpoint} onChange={(e) => setFormData({ ...formData, apiEndpoint: e.target.value })} />{errors.apiEndpoint && <p className="text-destructive text-xs">{errors.apiEndpoint}</p>}</div>
-          <div><Label>{t('providers.chatPath')}</Label><Input value={formData.chatPath || ''} onChange={(e) => setFormData({ ...formData, chatPath: e.target.value })} /></div>
-          <div><Label>{t('providers.headers')}</Label><Textarea rows={5} value={headersText} onChange={(e) => setHeadersText(e.target.value)} />{errors.headers && <p className="text-destructive text-xs">{errors.headers}</p>}</div>
-          <div><Label>{t('providers.supportedModels')}</Label><Textarea rows={4} value={modelsText} onChange={(e) => setModelsText(e.target.value)} placeholder="one model per line" /></div>
-          <div><Label>{t('providers.description')}</Label><Textarea rows={3} value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} /></div>
+          <div><Label>{t('providers.apiEndpoint')}</Label><Input value={formData.apiEndpoint} onChange={(e) => setFormData({ ...formData, apiEndpoint: e.target.value })} placeholder={t('providers.apiEndpointPlaceholder')} />{errors.apiEndpoint && <p className="text-destructive text-xs">{errors.apiEndpoint}</p>}</div>
+          <div><Label>{t('providers.chatPath')}</Label><Input value={formData.chatPath || ''} onChange={(e) => setFormData({ ...formData, chatPath: e.target.value })} placeholder={t('providers.chatPathPlaceholder')} /></div>
+          <div><Label>{t('providers.headers')}</Label><Textarea rows={5} value={headersText} onChange={(e) => setHeadersText(e.target.value)} /><p className="text-muted-foreground text-xs mt-1">{t('providers.headersHelper')}</p>{errors.headers && <p className="text-destructive text-xs">{errors.headers}</p>}</div>
+          <div><Label>{t('providers.supportedModels')}</Label><Textarea rows={4} value={modelsText} onChange={(e) => setModelsText(e.target.value)} placeholder={t('providers.supportedModelsPlaceholder')} /></div>
+          <div><Label>{t('providers.description')}</Label><Textarea rows={3} value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} placeholder={t('providers.descriptionPlaceholder')} /></div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
