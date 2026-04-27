@@ -9,6 +9,7 @@ import type { ProviderStatus } from '../../shared/types'
  * Account Status Enum
  */
 export type AccountStatus = 'active' | 'inactive' | 'expired' | 'error'
+export type AccountHealthStatus = 'unknown' | 'active' | 'invalid' | 'expired' | 'rate_limited' | 'network_error' | 'error'
 
 /**
  * Provider Type Enum
@@ -113,6 +114,14 @@ export interface Account {
   dailyLimit?: number
   /** Today used count */
   todayUsed?: number
+  /** Account health status from manual validation */
+  healthStatus?: AccountHealthStatus
+  /** Last manual validation timestamp */
+  lastValidatedAt?: number
+  /** Last manual validation error message */
+  lastValidationError?: string
+  /** Last manual validation latency (milliseconds) */
+  lastValidationLatency?: number
 }
 
 /**
@@ -573,6 +582,12 @@ export interface ValidationResult {
     used?: number
     expiresAt?: number
   }
+  /** Mapped account health status */
+  healthStatus?: AccountHealthStatus
+  /** Last validation error */
+  lastValidationError?: string
+  /** Validation latency (milliseconds) */
+  lastValidationLatency?: number
 }
 
 /**

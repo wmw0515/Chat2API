@@ -457,9 +457,16 @@ export function Providers() {
 
   const handleValidateAccount = async (id: string) => {
     try {
-      const isValid = await window.electronAPI.accounts.validate(id)
+      const validationResult = await window.electronAPI.accounts.validate(id)
+      const isValid = validationResult.valid
       if (isValid) {
-        store.updateAccount(id, { status: 'active' })
+        store.updateAccount(id, {
+          status: 'active',
+          healthStatus: validationResult.healthStatus || 'active',
+          lastValidatedAt: validationResult.validatedAt,
+          lastValidationError: undefined,
+          lastValidationLatency: validationResult.lastValidationLatency,
+        })
         
         if (store.selectedProviderId) {
           const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
@@ -475,7 +482,14 @@ export function Providers() {
           description: t('providers.credentialsValid'),
         })
       } else {
-        store.updateAccount(id, { status: 'error', errorMessage: t('providers.validateFailed') })
+        store.updateAccount(id, {
+          status: 'error',
+          errorMessage: validationResult.error || t('providers.validateFailed'),
+          healthStatus: validationResult.healthStatus || 'error',
+          lastValidatedAt: validationResult.validatedAt || Date.now(),
+          lastValidationError: validationResult.lastValidationError || validationResult.error,
+          lastValidationLatency: validationResult.lastValidationLatency,
+        })
         
         if (store.selectedProviderId) {
           const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
@@ -494,7 +508,13 @@ export function Providers() {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : t('providers.operationFailed')
-      store.updateAccount(id, { status: 'error', errorMessage })
+      store.updateAccount(id, {
+        status: 'error',
+        errorMessage,
+        healthStatus: 'network_error',
+        lastValidatedAt: Date.now(),
+        lastValidationError: errorMessage,
+      })
       
       if (store.selectedProviderId) {
         const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)

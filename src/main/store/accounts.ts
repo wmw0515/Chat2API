@@ -4,7 +4,7 @@
  */
 
 import { storeManager } from './store'
-import { Account, AccountStatus, ValidationResult } from './types'
+import { Account, AccountHealthStatus, AccountStatus, ValidationResult } from './types'
 import { validateCredentials } from './validator'
 
 /**
@@ -12,6 +12,52 @@ import { validateCredentials } from './validator'
  * Provides all operations related to accounts
  */
 export class AccountManager {
+  private static mapValidationHealthStatus(error?: string): AccountHealthStatus {
+    if (!error) return 'error'
+
+    const normalized = error.toLowerCase()
+
+    if (
+      normalized.includes('expired') ||
+      normalized.includes('token expired') ||
+      normalized.includes('session expired')
+    ) {
+      return 'expired'
+    }
+
+    if (
+      normalized.includes('401') ||
+      normalized.includes('403') ||
+      normalized.includes('unauthorized') ||
+      normalized.includes('forbidden') ||
+      normalized.includes('invalid credential') ||
+      normalized.includes('invalid api key') ||
+      normalized.includes('invalid token') ||
+      normalized.includes('invalid key')
+    ) {
+      return 'invalid'
+    }
+
+    if (
+      normalized.includes('429') ||
+      normalized.includes('rate limit')
+    ) {
+      return 'rate_limited'
+    }
+
+    if (
+      normalized.includes('timeout') ||
+      normalized.includes('network') ||
+      normalized.includes('econn') ||
+      normalized.includes('enotfound') ||
+      normalized.includes('socket hang up')
+    ) {
+      return 'network_error'
+    }
+
+    return 'error'
+  }
+
   /**
    * Get all accounts
    * @param includeCredentials Whether to include credentials (sensitive data)
@@ -80,6 +126,7 @@ export class AccountManager {
       requestCount: 0,
       todayUsed: 0,
       dailyLimit: data.dailyLimit,
+      healthStatus: 'unknown',
       lastStatusCheck: now,
       lastUsed: now,
     }
@@ -230,19 +277,41 @@ export class AccountManager {
       }
     }
     
+    const startedAt = Date.now()
     const result = await validateCredentials(provider, account.credentials)
+    const lastValidationLatency = Date.now() - startedAt
+    const lastValidatedAt = result.validatedAt || Date.now()
+    const healthStatus: AccountHealthStatus = result.valid
+      ? 'active'
+      : this.mapValidationHealthStatus(result.error)
     
     if (result.valid) {
       this.updateStatus(id, 'active')
       
-      if (result.accountInfo?.email) {
-        storeManager.updateAccount(id, { email: result.accountInfo.email })
-      }
+      storeManager.updateAccount(id, {
+        email: result.accountInfo?.email || account.email,
+        healthStatus,
+        lastValidatedAt,
+        lastValidationError: undefined,
+        lastValidationLatency,
+      })
     } else {
       this.updateStatus(id, 'error', result.error)
+      storeManager.updateAccount(id, {
+        healthStatus,
+        lastValidatedAt,
+        lastValidationError: result.error,
+        lastValidationLatency,
+      })
     }
     
-    return result
+    return {
+      ...result,
+      healthStatus,
+      lastValidationError: result.error,
+      lastValidationLatency,
+      validatedAt: lastValidatedAt,
+    }
   }
 
   /**
