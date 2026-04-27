@@ -28,7 +28,10 @@ import {
   ProviderModelCatalog,
   ProviderModelCatalogEntry,
   ProviderModelOverrides,
+  ModelRuntimeHealth,
+  RuntimeErrorCode,
   DEFAULT_PROVIDER_MODEL_CATALOGS,
+  DEFAULT_PROVIDER_MODEL_RUNTIME_HEALTHS,
   DEFAULT_USER_MODEL_OVERRIDES,
   UserModelOverrides,
   CustomModel,
@@ -213,6 +216,7 @@ class StoreManager {
       statistics: DEFAULT_STATISTICS,
       userModelOverrides: DEFAULT_USER_MODEL_OVERRIDES,
       providerModelCatalogs: DEFAULT_PROVIDER_MODEL_CATALOGS,
+      providerModelRuntimeHealths: DEFAULT_PROVIDER_MODEL_RUNTIME_HEALTHS,
     }
   }
 
@@ -1580,6 +1584,65 @@ class StoreManager {
     })
   }
 
+  private getProviderModelRuntimeHealths() {
+    this.ensureInitialized()
+    return this.store!.get('providerModelRuntimeHealths') || DEFAULT_PROVIDER_MODEL_RUNTIME_HEALTHS
+  }
+
+  private getModelRuntimeHealth(providerId: string, displayName: string): ModelRuntimeHealth | undefined {
+    const healths = this.getProviderModelRuntimeHealths()
+    return healths[`${providerId}:${displayName.toLowerCase()}`]
+  }
+
+  private setModelRuntimeHealth(health: ModelRuntimeHealth): void {
+    this.ensureInitialized()
+    const healths = this.getProviderModelRuntimeHealths()
+    this.store!.set('providerModelRuntimeHealths', {
+      ...healths,
+      [`${health.providerId}:${health.displayName.toLowerCase()}`]: health,
+    })
+  }
+
+  markModelRuntimeSuccess(providerId: string, displayName: string, actualModelId: string): void {
+    const now = Date.now()
+    const previous = this.getModelRuntimeHealth(providerId, displayName)
+    this.setModelRuntimeHealth({
+      providerId,
+      displayName,
+      actualModelId,
+      status: 'available',
+      lastCheckedAt: now,
+      lastSuccessAt: now,
+      lastFailureAt: previous?.lastFailureAt,
+      lastErrorCode: undefined,
+      lastErrorMessage: undefined,
+      failureCount: previous?.failureCount || 0,
+    })
+  }
+
+  markModelRuntimeFailure(
+    providerId: string,
+    displayName: string,
+    actualModelId: string,
+    errorCode: RuntimeErrorCode,
+    errorMessage: string,
+  ): void {
+    const now = Date.now()
+    const previous = this.getModelRuntimeHealth(providerId, displayName)
+    this.setModelRuntimeHealth({
+      providerId,
+      displayName,
+      actualModelId,
+      status: errorCode,
+      lastCheckedAt: now,
+      lastSuccessAt: previous?.lastSuccessAt,
+      lastFailureAt: now,
+      lastErrorCode: errorCode,
+      lastErrorMessage: errorMessage,
+      failureCount: (previous?.failureCount || 0) + 1,
+    })
+  }
+
   getModelSyncStatus(providerId: string) {
     const catalog = this.getProviderModelCatalog(providerId)
     return {
@@ -1645,12 +1708,13 @@ class StoreManager {
     defaultModels.forEach(displayName => {
       if (!overrides.excludedModels.includes(displayName)) {
         const actualModelId = modelMappings[displayName] || displayName
-        merged.set(displayName, {
-          displayName,
-          actualModelId,
-          isCustom: false,
-          source: 'static',
-        })
+      merged.set(displayName, {
+        displayName,
+        actualModelId,
+        isCustom: false,
+        source: 'static',
+        runtimeHealth: this.getModelRuntimeHealth(providerId, displayName),
+      })
       }
     })
 
@@ -1672,6 +1736,7 @@ class StoreManager {
         actualModelId: model.actualModelId,
         isCustom: false,
         source: 'discovered',
+        runtimeHealth: this.getModelRuntimeHealth(providerId, model.displayName),
       })
     })
 
@@ -1681,6 +1746,7 @@ class StoreManager {
         actualModelId: customModel.actualModelId,
         isCustom: true,
         source: 'manual',
+        runtimeHealth: this.getModelRuntimeHealth(providerId, customModel.displayName),
       })
     })
 
@@ -1817,6 +1883,7 @@ class StoreManager {
     const statistics = this.store!.get('statistics') || DEFAULT_STATISTICS
     const userModelOverrides = this.store!.get('userModelOverrides') || DEFAULT_USER_MODEL_OVERRIDES
     const providerModelCatalogs = this.store!.get('providerModelCatalogs') || DEFAULT_PROVIDER_MODEL_CATALOGS
+    const providerModelRuntimeHealths = this.store!.get('providerModelRuntimeHealths') || DEFAULT_PROVIDER_MODEL_RUNTIME_HEALTHS
     
     return {
       providers,
@@ -1829,6 +1896,7 @@ class StoreManager {
       statistics,
       userModelOverrides,
       providerModelCatalogs,
+      providerModelRuntimeHealths,
     }
   }
 

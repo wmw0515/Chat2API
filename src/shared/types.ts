@@ -1,5 +1,7 @@
 export type AccountStatus = 'active' | 'inactive' | 'expired' | 'error'
 export type AccountHealthStatus = 'unknown' | 'active' | 'invalid' | 'expired' | 'rate_limited' | 'network_error' | 'error'
+export type RuntimeErrorCode = 'credential_error' | 'model_invalid' | 'connection_error' | 'unknown_error'
+export type ModelRuntimeStatus = 'unknown' | 'available' | RuntimeErrorCode
 
 export type ProviderStatus = 'online' | 'offline' | 'unknown'
 
@@ -49,6 +51,11 @@ export interface Account {
   lastValidatedAt?: number
   lastValidationError?: string
   lastValidationLatency?: number
+  lastRuntimeSuccessAt?: number
+  lastRuntimeFailureAt?: number
+  lastRuntimeErrorCode?: RuntimeErrorCode
+  lastRuntimeErrorMessage?: string
+  runtimeFailureCount?: number
 }
 
 export interface Provider {
@@ -367,6 +374,20 @@ export interface EffectiveModel {
   actualModelId: string
   isCustom: boolean
   source?: 'static' | 'discovered' | 'manual'
+  runtimeHealth?: ModelRuntimeHealth
+}
+
+export interface ModelRuntimeHealth {
+  providerId: string
+  displayName: string
+  actualModelId: string
+  status: ModelRuntimeStatus
+  lastCheckedAt?: number
+  lastSuccessAt?: number
+  lastFailureAt?: number
+  lastErrorCode?: RuntimeErrorCode
+  lastErrorMessage?: string
+  failureCount?: number
 }
 
 export interface ProviderModelCatalogEntry {
