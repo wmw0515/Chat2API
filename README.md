@@ -193,6 +193,7 @@ Notes:
 - For minimal Linux service deployment, see `docs/headless-systemd.md`.
 - For OpenAI-compatible headless API verification, see `docs/headless-openai-smoke-test.md`.
 - For desktop-to-headless credential migration and client integration workflow, see `docs/headless-credential-migration.md`.
+- For provider compatibility status and real-provider validation planning, see `docs/provider-compatibility-matrix.md`.
 
 ## 📸 Screenshots
 

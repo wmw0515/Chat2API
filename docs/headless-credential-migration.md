@@ -106,6 +106,8 @@ Use this checklist per provider after import:
 - [ ] Optional: `POST /v1/chat/completions` smoke request succeeds.
 - [ ] Open WebUI/Hermes/OpenClaw can send a normal chat request successfully.
 
+For expanded compatibility dimensions (tool/function support expectations, health mapping notes, and failure taxonomy), see `docs/provider-compatibility-matrix.md`.
+
 ## Limitations
 
 - Migration is file-based and operator-driven.
