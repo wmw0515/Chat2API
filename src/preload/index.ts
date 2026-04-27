@@ -108,6 +108,7 @@ const providersAPI = {
   syncModels: (providerId: string): Promise<{
     success: boolean
     supported?: boolean
+    discoveryEnabled?: boolean
     lastSyncedAt?: number
     lastSyncStatus?: string
     lastSyncError?: string
@@ -119,6 +120,7 @@ const providersAPI = {
   getModelSyncStatus: (providerId: string): Promise<{
     providerId: string
     supported: boolean
+    discoveryEnabled?: boolean
     lastSyncedAt?: number
     lastSyncStatus: string
     lastSyncError?: string

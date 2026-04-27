@@ -1,6 +1,6 @@
 /**
  * Model Editor Component
- * Manages default and custom models for a provider
+ * Manages model catalog for a provider
  */
 
 import { useState, useEffect } from 'react'
@@ -28,6 +28,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useToast } from '@/hooks/use-toast'
 import { useProvidersStore } from '@/stores/providersStore'
 import type { EffectiveModel } from '@/types/electron'
+import { Badge } from '@/components/ui/badge'
 import { Plus, Trash2, RotateCcw, AlertTriangle, Loader2 } from 'lucide-react'
 
 interface ModelEditorProps {
@@ -58,6 +59,7 @@ export function ModelEditor({
   const [deletingModel, setDeletingModel] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState<{
     supported: boolean
+    discoveryEnabled?: boolean
     lastSyncedAt?: number
     lastSyncStatus?: string
     lastSyncError?: string
@@ -87,8 +89,19 @@ export function ModelEditor({
     }
   }
 
-  const defaultModels = models.filter(m => !m.isCustom)
-  const customModels = models.filter(m => m.isCustom)
+  const sortedModels = [...models].sort((a, b) => {
+    const sourcePriority: Record<NonNullable<EffectiveModel['source']>, number> = {
+      manual: 0,
+      static: 1,
+      discovered: 2,
+    }
+    const sourceA = a.source ?? 'static'
+    const sourceB = b.source ?? 'static'
+    const sourceDiff = sourcePriority[sourceA] - sourcePriority[sourceB]
+    if (sourceDiff !== 0) return sourceDiff
+    return a.displayName.localeCompare(b.displayName)
+  })
+  const isDiscoveryEnabled = syncStatus?.discoveryEnabled === true
 
   const loadSyncStatus = async () => {
     try {
@@ -240,7 +253,7 @@ export function ModelEditor({
     }
   }
 
-  const renderModelTable = (modelList: EffectiveModel[], isCustom: boolean) => {
+  const renderModelTable = (modelList: EffectiveModel[]) => {
     if (modelList.length === 0) {
       return (
         <div className="text-center py-8 text-muted-foreground border rounded-lg">
@@ -256,6 +269,7 @@ export function ModelEditor({
             <TableRow>
               <TableHead>{t('modelEditor.displayName')}</TableHead>
               <TableHead>{t('modelEditor.actualModelId')}</TableHead>
+              <TableHead>{t('modelEditor.source')}</TableHead>
               <TableHead className="w-[80px]">{t('modelEditor.actions')}</TableHead>
             </TableRow>
           </TableHeader>
@@ -273,6 +287,11 @@ export function ModelEditor({
                     <code className="text-sm">
                       {showBoth ? model.actualModelId : model.displayName}
                     </code>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs">
+                      {model.source ? t(`modelEditor.source.${model.source}`) : t('modelEditor.source.static')}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <Button
@@ -311,7 +330,7 @@ export function ModelEditor({
               {t('modelEditor.title', { name: providerName })}
             </DialogTitle>
             <DialogDescription>
-              {t('modelEditor.warningMessage')}
+              {t('modelEditor.manualWorkflowHint')}
             </DialogDescription>
           </DialogHeader>
 
@@ -321,15 +340,7 @@ export function ModelEditor({
             </div>
           ) : (
             <div className="space-y-6 mt-4">
-              <div>
-                <h3 className="text-lg font-semibold mb-3">{t('modelEditor.defaultModels')}</h3>
-                {renderModelTable(defaultModels, false)}
-              </div>
-
-              <div>
-                <h3 className="text-lg font-semibold mb-3">{t('modelEditor.customModels')}</h3>
-                {renderModelTable(customModels, true)}
-              </div>
+              {renderModelTable(sortedModels)}
 
               <Alert>
                 <AlertTriangle className="h-4 w-4" />
@@ -338,12 +349,9 @@ export function ModelEditor({
                 </AlertDescription>
               </Alert>
 
-              <div className="text-xs text-muted-foreground space-y-1">
-                <div>{t('modelEditor.lastSyncedAt')}: {syncStatus?.lastSyncedAt ? new Date(syncStatus.lastSyncedAt).toLocaleString() : '-'}</div>
-                <div>{t('modelEditor.syncStatus')}: {syncStatus?.lastSyncStatus || 'idle'}</div>
-                {syncStatus?.lastSyncError ? <div>{t('modelEditor.syncError')}: {syncStatus.lastSyncError}</div> : null}
-                {syncStatus && !syncStatus.supported ? <div>{t('modelEditor.syncUnsupported')}</div> : null}
-              </div>
+              {!isDiscoveryEnabled ? (
+                <p className="text-xs text-muted-foreground">{t('modelEditor.discoveryDisabledNote')}</p>
+              ) : null}
             </div>
           )}
 
@@ -370,14 +378,16 @@ export function ModelEditor({
                   )}
                   {t('modelEditor.resetDefault')}
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleSyncModels}
-                  disabled={isLoading || isSyncing || (syncStatus ? !syncStatus.supported : false)}
-                >
-                  {isSyncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                  {t('modelEditor.syncModels')}
-                </Button>
+                {isDiscoveryEnabled ? (
+                  <Button
+                    variant="outline"
+                    onClick={handleSyncModels}
+                    disabled={isLoading || isSyncing || (syncStatus ? !syncStatus.supported : false)}
+                  >
+                    {isSyncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                    {t('modelEditor.syncModels')}
+                  </Button>
+                ) : null}
               </div>
               <Button
                 variant="outline"
