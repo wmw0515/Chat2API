@@ -29,16 +29,16 @@ export const deepseekConfig: BuiltinProviderConfig = {
   enabled: true,
   description: 'DeepSeek AI assistant, supports deep thinking and web search',
   supportedModels: [
-    'DeepSeek-V3.2',
+    'DeepSeek-Fast',
     'DeepSeek-Search',
-    'DeepSeek-R1',
-    'DeepSeek-R1-Search',
+    'DeepSeek-Expert',
+    'DeepSeek-Expert-Search',
   ],
   modelMappings: {
-    'DeepSeek-V3.2': 'deepseek-chat',
+    'DeepSeek-Fast': 'deepseek-chat',
     'DeepSeek-Search': 'deepseek-chat',
-    'DeepSeek-R1': 'deepseek-chat',
-    'DeepSeek-R1-Search': 'deepseek-chat',
+    'DeepSeek-Expert': 'deepseek-chat',
+    'DeepSeek-Expert-Search': 'deepseek-chat',
   },
   credentialFields: [
     {

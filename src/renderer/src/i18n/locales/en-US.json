@@ -291,10 +291,10 @@
     "userTokenPlaceholder": "Enter DeepSeek User Token",
     "userTokenHelp": "Copy the token after Authorization: Bearer from DeepSeek web requests, or find the corresponding token in Local Storage. Enter only the token value, without Bearer, quotes, or JSON wrapper.",
     "models": {
-      "DeepSeek-V3.2": "DeepSeek V3.2 - Standard Chat",
+      "DeepSeek-Fast": "DeepSeek Fast - Standard Chat",
       "DeepSeek-Search": "DeepSeek Search - Web Search",
-      "DeepSeek-R1": "DeepSeek R1 - Deep Thinking",
-      "DeepSeek-R1-Search": "DeepSeek R1 Search - Web Search + Thinking"
+      "DeepSeek-Expert": "DeepSeek Expert - Deep Thinking",
+      "DeepSeek-Expert-Search": "DeepSeek Expert Search - Web Search + Thinking"
     }
   },
   "glm": {
