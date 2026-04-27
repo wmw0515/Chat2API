@@ -147,7 +147,7 @@ export class InAppLoginManager extends EventEmitter {
       const setCookieHeaders = details.responseHeaders?.['set-cookie'] || details.responseHeaders?.['Set-Cookie']
       if (setCookieHeaders && Array.isArray(setCookieHeaders)) {
         for (const cookieHeader of setCookieHeaders) {
-          console.log('[InAppLogin] Set-Cookie header:', cookieHeader.substring(0, 100))
+          console.log('[InAppLogin] Set-Cookie header received')
           
           const cookieParts = cookieHeader.split(';')
           const nameValue = cookieParts[0]?.trim()
@@ -217,7 +217,7 @@ export class InAppLoginManager extends EventEmitter {
     this.loginSession.cookies.on('changed', async (_event, cookie, _cause, removed) => {
       if (this.isCompleted || removed) return
 
-      console.log('[InAppLogin] Cookie changed:', { name: cookie.name, value: cookie.value ? cookie.value.substring(0, 50) + '...' : 'null', removed })
+      console.log('[InAppLogin] Cookie changed:', { name: cookie.name, hasValue: Boolean(cookie.value), removed })
 
       if (!this.hasMinTimePassed()) {
         console.log('[InAppLogin] Min time not passed, skipping cookie check')
@@ -231,7 +231,7 @@ export class InAppLoginManager extends EventEmitter {
             console.log('[InAppLogin] Cookie token is valid, emitting tokenFound')
             this.emit('tokenFound', { key: source.key, value: cookie.value })
           } else {
-            console.log('[InAppLogin] Cookie token is invalid:', cookie.value ? cookie.value.substring(0, 50) : 'null')
+            console.log('[InAppLogin] Cookie token is invalid for source key:', source.key)
           }
         }
       }
@@ -271,7 +271,7 @@ export class InAppLoginManager extends EventEmitter {
   }
 
   private isValidToken(value: string): boolean {
-    console.log('[InAppLogin] Checking token validity:', value.length, value.substring(0, 20))
+    console.log('[InAppLogin] Checking token validity, length:', value.length)
     
     if (!value || value.length < 5) {
       console.log('[InAppLogin] Token rejected: too short or empty')
@@ -298,7 +298,7 @@ export class InAppLoginManager extends EventEmitter {
       if (parts.length === 3) {
         try {
           const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString())
-          console.log('[InAppLogin] JWT payload:', payload)
+          console.log('[InAppLogin] JWT payload parsed successfully')
           
           // Reject guest accounts
           if (payload.email && payload.email.includes('@guest.com')) {
@@ -378,7 +378,7 @@ export class InAppLoginManager extends EventEmitter {
           (function() {
             try {
               const value = localStorage.getItem('${source.key}');
-              console.log('[InAppLogin] localStorage.getItem("${source.key}"):', value);
+              console.log('[InAppLogin] localStorage.getItem("${source.key}") found:', Boolean(value));
               return value || null;
             } catch (e) {
               console.error('[InAppLogin] Error reading localStorage:', e);
@@ -387,14 +387,14 @@ export class InAppLoginManager extends EventEmitter {
           })()
         `
         const value = await webContents.executeJavaScript(script)
-        console.log('[InAppLogin] Got value from localStorage:', source.key, value ? value.substring(0, 50) + '...' : 'null')
+        console.log('[InAppLogin] Got value from localStorage:', source.key, Boolean(value))
 
         if (source.key === 'user_detail_agent' && value) {
           try {
             const parsed = JSON.parse(value)
             const realUserID = parsed.realUserID || parsed.id
             if (realUserID) {
-              console.log('[InAppLogin] Found realUserID from user_detail_agent:', realUserID)
+              console.log('[InAppLogin] Found realUserID from user_detail_agent')
               this.emit('tokenFound', { key: 'realUserID', value: String(realUserID) })
             }
           } catch (e) {
@@ -409,7 +409,7 @@ export class InAppLoginManager extends EventEmitter {
             const parsed = JSON.parse(value)
             if (parsed.value) {
               tokenValue = parsed.value
-              console.log('[InAppLogin] Extracted token from JSON:', tokenValue.substring(0, 50) + '...')
+              console.log('[InAppLogin] Extracted token from JSON payload')
             }
           } catch (e) {
             console.error('[InAppLogin] Error parsing JSON token:', e)
@@ -428,7 +428,7 @@ export class InAppLoginManager extends EventEmitter {
 
         const allCookies = await this.loginSession.cookies.get({})
         console.log('[InAppLogin] All cookies count:', allCookies.length)
-        console.log('[InAppLogin] All cookies:', allCookies.map(c => `${c.name}=${c.value?.substring(0, 20)}...`))
+        console.log('[InAppLogin] All cookie names:', allCookies.map(c => c.name))
         
         const targetDomains = this.config?.targetDomains || []
         let cookiesToSearch = allCookies
@@ -451,7 +451,7 @@ export class InAppLoginManager extends EventEmitter {
 
         const cookie = cookiesToSearch.find(c => c.name === source.key)
         if (cookie) {
-          console.log('[InAppLogin] Found cookie:', source.key, cookie.value ? cookie.value.substring(0, 50) + '...' : 'null')
+          console.log('[InAppLogin] Found cookie:', source.key, 'hasValue:', Boolean(cookie.value))
 
           if (cookie.value && this.isValidToken(cookie.value)) {
             console.log('[InAppLogin] Token found and valid from cookie:', source.key, 'emitting tokenFound event')
@@ -463,7 +463,7 @@ export class InAppLoginManager extends EventEmitter {
             }
             this.emit('tokenFound', { key: source.key, value: cookie.value, allCookies: allCookiesObj })
           } else {
-            console.log('[InAppLogin] Cookie token is invalid:', source.key, cookie.value ? cookie.value.substring(0, 50) : 'null')
+            console.log('[InAppLogin] Cookie token is invalid for source key:', source.key)
           }
         } else {
           console.log('[InAppLogin] Cookie not found:', source.key)

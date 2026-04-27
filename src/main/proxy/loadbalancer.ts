@@ -113,7 +113,13 @@ export class LoadBalancer {
       console.log(`[LoadBalancer] Provider ${provider.name} (${provider.id}) has ${accounts.length} available accounts`)
 
       for (const account of accounts) {
-        console.log(`[LoadBalancer] Account ${account.name} (${account.id}) Token: ${(account.credentials.token || '').substring(0, 20)}...`)
+        console.log('[LoadBalancer] Account candidate metadata:', {
+          accountId: account.id,
+          providerId: provider.id,
+          hasCredentials: Boolean(account.credentials && Object.keys(account.credentials).length > 0),
+          credentialKeyCount: account.credentials ? Object.keys(account.credentials).length : 0,
+          credentialFieldNames: account.credentials ? Object.keys(account.credentials) : [],
+        })
         candidates.push({
           account,
           provider,

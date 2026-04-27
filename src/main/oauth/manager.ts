@@ -328,7 +328,11 @@ export class OAuthManager extends EventEmitter {
       let validationTimeout: NodeJS.Timeout | null = null
 
       const tokenFoundHandler = async (event: { key: string; value: string; allCookies?: Record<string, string> }) => {
-        console.log('[OAuthManager] tokenFoundHandler called, isValidating:', isValidating, 'event:', event.key, event.value.substring(0, 50) + '...')
+        console.log('[OAuthManager] tokenFoundHandler called:', {
+          isValidating,
+          key: event.key,
+          hasValue: Boolean(event.value),
+        })
 
         // Store the token
         collectedTokens[event.key] = event.value
@@ -458,8 +462,12 @@ export class OAuthManager extends EventEmitter {
             const userId = collectedTokens.userId || collectedTokens.user_id
             const phToken = collectedTokens.xiaomichatbot_ph || collectedTokens.ph_token
 
-            console.log('[OAuthManager] Mimo collectedTokens:', JSON.stringify(collectedTokens, null, 2))
-            console.log('[OAuthManager] Mimo extracted values:', { serviceToken: serviceToken?.substring(0, 20), userId, phToken: phToken?.substring(0, 20) })
+            console.log('[OAuthManager] Mimo token collection status:', {
+              tokenKeys: Object.keys(collectedTokens),
+              hasServiceToken: Boolean(serviceToken),
+              hasUserId: Boolean(userId),
+              hasPhToken: Boolean(phToken),
+            })
 
             if (!serviceToken || !userId || !phToken) {
               console.log('[OAuthManager] Mimo: Missing required tokens, aborting validation')
@@ -492,7 +500,10 @@ export class OAuthManager extends EventEmitter {
           console.log('[OAuthManager] Validation result:', validation)
 
           if (validation.valid) {
-            console.log('[OAuthManager] Token is valid, completing login with credentials:', JSON.stringify(finalCredentials, null, 2))
+            console.log('[OAuthManager] Token is valid, completing login with credential metadata:', {
+              credentialFieldNames: Object.keys(finalCredentials),
+              credentialKeyCount: Object.keys(finalCredentials).length,
+            })
             inAppLoginManager.completeWithSuccess(finalCredentials)
           } else {
             console.log('[OAuthManager] Token validation failed:', validation.error)
