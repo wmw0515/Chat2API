@@ -419,10 +419,10 @@ export function CustomProviderForm({
                   <p className="text-xs text-destructive">{errors.credentialFields}</p>
                 )}
                 {formData.credentialFields.map((field, index) => (
-                  <div key={`${field.name || 'credential'}-${index}`} className="space-y-3 rounded-md border p-3 bg-background">
+                  <div key={`credential-field-${index}`} className="space-y-3 rounded-md border p-3 bg-background">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div className="space-y-2">
-                        <Label>{t('providers.headerName')}</Label>
+                        <Label>{t('providers.credentialFieldName')}</Label>
                         <Input
                           value={field.name}
                           onChange={(e) => handleCredentialFieldChange(index, 'name', e.target.value)}
@@ -433,7 +433,7 @@ export function CustomProviderForm({
                         )}
                       </div>
                       <div className="space-y-2">
-                        <Label>{t('providers.providerName')}</Label>
+                        <Label>{t('providers.credentialFieldDisplayLabel')}</Label>
                         <Input
                           value={field.label}
                           onChange={(e) => handleCredentialFieldChange(index, 'label', e.target.value)}
@@ -444,7 +444,7 @@ export function CustomProviderForm({
                         )}
                       </div>
                       <div className="space-y-2">
-                        <Label>{t('providers.providerType')}</Label>
+                        <Label>{t('providers.credentialFieldType')}</Label>
                         <Select
                           value={field.type}
                           onValueChange={(value: CredentialField['type']) =>
@@ -462,7 +462,7 @@ export function CustomProviderForm({
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label>{t('providers.headerValue')}</Label>
+                        <Label>{t('providers.credentialFieldPlaceholder')}</Label>
                         <Input
                           value={field.placeholder || ''}
                           onChange={(e) => handleCredentialFieldChange(index, 'placeholder', e.target.value)}
@@ -470,7 +470,7 @@ export function CustomProviderForm({
                         />
                       </div>
                       <div className="space-y-2 md:col-span-2">
-                        <Label>{t('providers.description')}</Label>
+                        <Label>{t('providers.credentialFieldHelpText')}</Label>
                         <Input
                           value={field.helpText || ''}
                           onChange={(e) => handleCredentialFieldChange(index, 'helpText', e.target.value)}
@@ -484,7 +484,7 @@ export function CustomProviderForm({
                           checked={field.required}
                           onCheckedChange={(checked) => handleCredentialFieldChange(index, 'required', checked)}
                         />
-                        <span className="text-sm text-muted-foreground">{t('providers.required')}</span>
+                        <span className="text-sm text-muted-foreground">{t('providers.credentialFieldRequired')}</span>
                       </div>
                       <Button
                         type="button"
@@ -493,14 +493,14 @@ export function CustomProviderForm({
                         onClick={() => handleRemoveCredentialField(index)}
                       >
                         <X className="h-4 w-4 mr-1" />
-                        Remove
+                        {t('providers.credentialFieldRemove')}
                       </Button>
                     </div>
                   </div>
                 ))}
                 <Button type="button" variant="outline" className="w-full" onClick={handleAddCredentialField}>
                   <Plus className="h-4 w-4 mr-2" />
-                  Add credential field
+                  {t('providers.addCredentialField')}
                 </Button>
               </div>
             </div>
