@@ -81,6 +81,10 @@ export class HealthCheckService {
 
   private maxIntervalHours = 24
 
+  private hasLoadedStoreSchedulerConfig = false
+
+  private hasLoggedStoreNotReadyWarning = false
+
   private readonly providerState = new Map<string, SchedulerProviderState>()
 
   private timer: NodeJS.Timeout | null = null
@@ -94,7 +98,7 @@ export class HealthCheckService {
   private nextScheduledRunAt?: number
 
   private constructor() {
-    this.loadSchedulerConfig()
+    this.applySchedulerConfig(this.getEnvSchedulerConfig())
   }
 
   static getInstance(): HealthCheckService {
@@ -117,6 +121,7 @@ export class HealthCheckService {
   }
 
   getSchedulerConfig(): HealthCheckSchedulerConfig {
+    this.loadSchedulerConfig()
     return {
       enabled: this.enabled,
       minIntervalHours: this.minIntervalHours,
@@ -125,16 +130,15 @@ export class HealthCheckService {
   }
 
   updateSchedulerConfig(config: Partial<HealthCheckSchedulerConfig>): ScheduledHealthCheckStatus {
+    this.loadSchedulerConfig()
     const normalized = normalizeSchedulerConfig({
       ...this.getSchedulerConfig(),
       ...config,
     })
-    this.enabled = normalized.enabled
-    this.minIntervalHours = normalized.minIntervalHours
-    this.maxIntervalHours = normalized.maxIntervalHours
-    storeManager.updateConfig({ healthCheckScheduler: normalized })
+    this.applySchedulerConfig(normalized)
+    this.safeUpdateStoreConfig(normalized)
     this.restartScheduler()
-    storeManager.addLog('info', '[HealthCheckScheduler] Config updated', { data: normalized })
+    this.safeAddLog('info', '[HealthCheckScheduler] Config updated', { data: normalized })
     return this.getSchedulerStatus()
   }
 
@@ -144,6 +148,9 @@ export class HealthCheckService {
   }
 
   startScheduler(): void {
+    if (!this.loadSchedulerConfig()) {
+      return
+    }
     if (this.running) {
       return
     }
@@ -152,7 +159,7 @@ export class HealthCheckService {
     }
     this.running = true
     this.scheduleNextRun(10_000)
-    storeManager.addLog('info', '[HealthCheckScheduler] Started', {
+    this.safeAddLog('info', '[HealthCheckScheduler] Started', {
       data: {
         minIntervalHours: this.minIntervalHours,
         maxIntervalHours: this.maxIntervalHours,
@@ -170,27 +177,91 @@ export class HealthCheckService {
     }
     this.running = false
     this.nextScheduledRunAt = undefined
-    storeManager.addLog('info', '[HealthCheckScheduler] Stopped')
+    this.safeAddLog('info', '[HealthCheckScheduler] Stopped')
   }
 
-  private loadSchedulerConfig(): void {
-    const config = storeManager.getConfig()
-    const hasStoredConfig = config.healthCheckScheduler && typeof config.healthCheckScheduler === 'object'
-    const envConfig: HealthCheckSchedulerConfig = normalizeSchedulerConfig({
+  private getEnvSchedulerConfig(): HealthCheckSchedulerConfig {
+    return normalizeSchedulerConfig({
       enabled: process.env.CHAT2API_HEALTH_CHECK_ENABLED === '1',
       minIntervalHours: parsePositiveIntEnv('CHAT2API_HEALTH_CHECK_MIN_INTERVAL_HOURS', 12),
       maxIntervalHours: parsePositiveIntEnv('CHAT2API_HEALTH_CHECK_MAX_INTERVAL_HOURS', 24),
     })
-    const runtimeConfig = hasStoredConfig
-      ? normalizeSchedulerConfig(config.healthCheckScheduler)
-      : envConfig
+  }
 
-    this.enabled = runtimeConfig.enabled
-    this.minIntervalHours = runtimeConfig.minIntervalHours
-    this.maxIntervalHours = runtimeConfig.maxIntervalHours
+  private applySchedulerConfig(config: HealthCheckSchedulerConfig): void {
+    this.enabled = config.enabled
+    this.minIntervalHours = config.minIntervalHours
+    this.maxIntervalHours = config.maxIntervalHours
+  }
 
-    if (!hasStoredConfig) {
-      storeManager.updateConfig({ healthCheckScheduler: runtimeConfig })
+  private safeUpdateStoreConfig(config: HealthCheckSchedulerConfig): void {
+    try {
+      if (!storeManager.getStore()) {
+        return
+      }
+      storeManager.updateConfig({ healthCheckScheduler: config })
+    } catch {
+      // ignore non-critical store update failures during startup
+    }
+  }
+
+  private safeAddLog(level: 'info' | 'warn' | 'error', message: string, payload?: { data?: unknown }): void {
+    try {
+      if (storeManager.getStore()) {
+        storeManager.addLog(level, message, payload)
+        return
+      }
+    } catch {
+      // ignore and fallback to console
+    }
+
+    if (level === 'error') {
+      console.error(message, payload?.data ?? '')
+      return
+    }
+    if (level === 'warn') {
+      console.warn(message, payload?.data ?? '')
+      return
+    }
+    console.log(message, payload?.data ?? '')
+  }
+
+  private loadSchedulerConfig(): boolean {
+    if (this.hasLoadedStoreSchedulerConfig) {
+      return true
+    }
+
+    if (!storeManager.getStore()) {
+      if (!this.hasLoggedStoreNotReadyWarning) {
+        this.hasLoggedStoreNotReadyWarning = true
+        this.safeAddLog('warn', '[HealthCheckScheduler] Store not initialized yet, scheduler start delayed')
+      }
+      return false
+    }
+
+    try {
+      const config = storeManager.getConfig()
+      const hasStoredConfig = config.healthCheckScheduler && typeof config.healthCheckScheduler === 'object'
+      const envConfig = this.getEnvSchedulerConfig()
+      const runtimeConfig = hasStoredConfig
+        ? normalizeSchedulerConfig(config.healthCheckScheduler)
+        : envConfig
+
+      this.applySchedulerConfig(runtimeConfig)
+      this.hasLoadedStoreSchedulerConfig = true
+      this.hasLoggedStoreNotReadyWarning = false
+
+      if (!hasStoredConfig) {
+        this.safeUpdateStoreConfig(runtimeConfig)
+      }
+
+      return true
+    } catch {
+      if (!this.hasLoggedStoreNotReadyWarning) {
+        this.hasLoggedStoreNotReadyWarning = true
+        this.safeAddLog('warn', '[HealthCheckScheduler] Store not initialized yet, scheduler start delayed')
+      }
+      return false
     }
   }
 
