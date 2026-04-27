@@ -60,6 +60,10 @@ export class DeepSeekHash {
     return this.cachedUint8Memory
   }
 
+  public isInitialized(): boolean {
+    return Boolean(this.wasmInstance)
+  }
+
   public calculateHash(
     algorithm: string,
     challenge: string,
@@ -67,6 +71,10 @@ export class DeepSeekHash {
     difficulty: number,
     expireAt: number
   ): number | undefined {
+    if (!this.isInitialized()) {
+      throw new Error('DeepSeekHash WASM is not initialized')
+    }
+
     if (algorithm !== 'DeepSeekHashV1') {
       throw new Error('Unsupported algorithm: ' + algorithm)
     }
@@ -116,25 +124,42 @@ export class DeepSeekHash {
 }
 
 let deepSeekHashInstance: DeepSeekHash | null = null
+let deepSeekHashInitPromise: Promise<DeepSeekHash> | null = null
 
 export async function getDeepSeekHash(): Promise<DeepSeekHash> {
-  if (!deepSeekHashInstance) {
-    deepSeekHashInstance = new DeepSeekHash()
+  if (deepSeekHashInstance?.isInitialized()) {
+    return deepSeekHashInstance
+  }
+
+  if (deepSeekHashInitPromise) {
+    return deepSeekHashInitPromise
+  }
+
+  deepSeekHashInitPromise = (async () => {
+    const instance = new DeepSeekHash()
     // Use different paths for development and production environments
     const wasmPath = app.isPackaged
       ? path.join(process.resourcesPath, 'sha3_wasm_bg.7b9ca65ddd.wasm')
       : path.join(app.getAppPath(), 'sha3_wasm_bg.7b9ca65ddd.wasm')
+    const wasmExists = fs.existsSync(wasmPath)
     console.log('[DeepSeekHash] WASM path:', wasmPath)
-    console.log('[DeepSeekHash] File exists:', fs.existsSync(wasmPath))
+    console.log('[DeepSeekHash] File exists:', wasmExists)
+
     try {
-      await deepSeekHashInstance.init(wasmPath)
+      await instance.init(wasmPath)
+      deepSeekHashInstance = instance
       console.log('[DeepSeekHash] WASM initialized successfully')
+      return deepSeekHashInstance
     } catch (error) {
+      deepSeekHashInstance = null
       console.error('[DeepSeekHash] WASM initialization failed:', error)
       throw error
+    } finally {
+      deepSeekHashInitPromise = null
     }
-  }
-  return deepSeekHashInstance
+  })()
+
+  return deepSeekHashInitPromise
 }
 
 export default DeepSeekHash
