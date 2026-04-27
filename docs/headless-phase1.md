@@ -23,16 +23,24 @@ Optional environment variables:
 
 - `CHAT2API_HOST` (default: value from config, usually `127.0.0.1`)
 - `CHAT2API_PORT` (default: value from config, usually `8080`)
+- `CHAT2API_DASHBOARD_TOKEN` (optional; when set, `/dashboard-api/*` requires this token)
 
 Example:
 
 ```bash
-CHAT2API_HOST=0.0.0.0 CHAT2API_PORT=8080 npm run start:headless
+CHAT2API_HOST=127.0.0.1 CHAT2API_PORT=8081 CHAT2API_DASHBOARD_TOKEN=your-dashboard-token npm run start:headless
 ```
 
 ## Browser dashboard support (follow-up scope)
 
 Headless mode now serves the built renderer and a `/dashboard-api` surface that supports a practical provider/account workflow from the browser:
+
+Security note:
+
+- For development, you can leave `CHAT2API_DASHBOARD_TOKEN` unset.
+- For headless/server use, set `CHAT2API_DASHBOARD_TOKEN` so dashboard API routes are protected.
+- The dashboard API should not be exposed publicly without token protection and an additional network boundary (for example, localhost-only bind or trusted private network).
+
 
 - Open dashboard in browser.
 - View providers and accounts.
@@ -46,7 +54,7 @@ Recommended run/test flow:
 npm install
 npm run build
 npm run start:headless
-# open http://127.0.0.1:8080/#/providers
+# open http://127.0.0.1:8081/#/providers
 ```
 
 ## Current limitations (intentionally out of scope)

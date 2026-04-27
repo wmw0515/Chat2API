@@ -4,6 +4,17 @@ type RequestOptions = {
 }
 
 const apiBase = '/dashboard-api'
+const dashboardTokenStorageKey = 'chat2api.dashboardToken'
+
+
+function getDashboardToken(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(dashboardTokenStorageKey)?.trim() || ''
+  } catch {
+    return ''
+  }
+}
 
 function extractErrorMessage(payload: any, fallback: string): string {
   if (!payload) return fallback
@@ -15,11 +26,17 @@ function extractErrorMessage(payload: any, fallback: string): string {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const dashboardToken = getDashboardToken()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  if (dashboardToken) {
+    headers['X-Dashboard-Token'] = dashboardToken
+  }
+
   const response = await fetch(`${apiBase}${path}`, {
     method: options.method || 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
 
@@ -33,6 +50,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   })() : null
 
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error('Dashboard token is missing or invalid. Set localStorage key "chat2api.dashboardToken" and refresh the page.')
+    }
     throw new Error(extractErrorMessage(payload, `Request failed: ${response.status}`))
   }
 
