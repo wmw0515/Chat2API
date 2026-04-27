@@ -122,6 +122,20 @@ export function installBrowserApiShim() {
       get: () => request('/config'),
       update: (updates: Record<string, unknown>) => request('/config', { method: 'PUT', body: updates }),
     },
+    dashboard: {
+      exportData: (options?: { includeCredentials?: boolean }) =>
+        request(`/export?includeCredentials=${options?.includeCredentials ? '1' : '0'}`),
+      importData: (
+        payload: unknown,
+        options?: { dryRun?: boolean },
+      ) => request('/import', {
+        method: 'POST',
+        body: {
+          dryRun: Boolean(options?.dryRun),
+          ...((payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>),
+        },
+      }),
+    },
     invoke: (channel: string, payload?: any) => {
       if (channel === 'proxy:getStatistics') {
         return request('/health').then((data: any) => data.statistics)

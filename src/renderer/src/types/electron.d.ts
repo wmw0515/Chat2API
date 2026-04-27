@@ -464,6 +464,29 @@ interface ContextManagementAPI {
   updateConfig: (updates: Partial<ContextManagementConfig>) => Promise<ContextManagementConfig>
 }
 
+interface DashboardImportExportPayload {
+  version: string
+  exportedAt: string
+  includeCredentials: boolean
+  providers: Provider[]
+  accounts: Array<Omit<Account, 'credentials'> & { credentials?: Record<string, string> }>
+}
+
+interface DashboardImportExportAPI {
+  exportData: (options?: { includeCredentials?: boolean }) => Promise<DashboardImportExportPayload>
+  importData: (
+    payload: DashboardImportExportPayload,
+    options?: { dryRun?: boolean },
+  ) => Promise<{
+    success: boolean
+    dryRun: boolean
+    summary: {
+      providers: { created: string[]; updated: string[]; skipped: string[] }
+      accounts: { created: string[]; updated: string[]; skipped: string[] }
+    }
+  }>
+}
+
 interface ElectronAPI {
   proxy: ProxyAPI
   store: StoreAPI
@@ -479,6 +502,7 @@ interface ElectronAPI {
   session: SessionAPI
   managementApi: ManagementApiAPI
   contextManagement: ContextManagementAPI
+  dashboard: DashboardImportExportAPI
   tray: TrayAPI
   on: (channel: string, callback: (...args: unknown[]) => void) => () => void
   send: (channel: string, ...args: unknown[]) => void

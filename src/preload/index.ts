@@ -65,6 +65,8 @@ const providersAPI = {
     ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_BUILTIN),
   
   add: (data: {
+    id?: string
+    type?: 'builtin' | 'custom'
     name: string
     authType: AuthType
     apiEndpoint: string
@@ -632,6 +634,132 @@ const trayAPI = {
     ipcRenderer.send('tray:quit-app'),
 }
 
+const dashboardAPI = {
+  exportData: async (options?: { includeCredentials?: boolean }) => {
+    const providers = await providersAPI.getAll()
+    const accounts = await accountsAPI.getAll(Boolean(options?.includeCredentials))
+    return {
+      version: '1.2.0',
+      exportedAt: new Date().toISOString(),
+      includeCredentials: Boolean(options?.includeCredentials),
+      providers,
+      accounts: accounts.map((account) => {
+        if (options?.includeCredentials) {
+          return account
+        }
+        const { credentials: _credentials, ...safeAccount } = account
+        return safeAccount
+      }),
+    }
+  },
+  importData: async (
+    payload: {
+      version: string
+      exportedAt: string
+      includeCredentials: boolean
+      providers: Provider[]
+      accounts: Array<Omit<Account, 'credentials'> & { credentials?: Record<string, string> }>
+    },
+    options?: { dryRun?: boolean },
+  ) => {
+    const dryRun = Boolean(options?.dryRun)
+    const summary = {
+      providers: { created: [] as string[], updated: [] as string[], skipped: [] as string[] },
+      accounts: { created: [] as string[], updated: [] as string[], skipped: [] as string[] },
+    }
+
+    const providerIds = new Set((await providersAPI.getAll()).map((provider) => provider.id))
+
+    for (const provider of payload.providers || []) {
+      if (!provider?.id) {
+        summary.providers.skipped.push('missing-provider-id')
+        continue
+      }
+
+      const existing = providerIds.has(provider.id)
+      if (existing) {
+        if (!dryRun) {
+          await providersAPI.update(provider.id, {
+            name: provider.name,
+            authType: provider.authType,
+            apiEndpoint: provider.apiEndpoint,
+            chatPath: provider.chatPath,
+            headers: provider.headers,
+            enabled: provider.enabled,
+            description: provider.description,
+            icon: provider.icon,
+            supportedModels: provider.supportedModels,
+            modelMappings: provider.modelMappings,
+          } as Partial<Provider>)
+        }
+        summary.providers.updated.push(provider.id)
+      } else if (provider.type === 'custom') {
+        if (!dryRun) {
+          await providersAPI.add({
+            id: provider.id,
+            type: 'custom',
+            name: provider.name,
+            authType: provider.authType,
+            apiEndpoint: provider.apiEndpoint,
+            headers: provider.headers,
+            description: provider.description,
+            supportedModels: provider.supportedModels,
+          })
+        }
+        summary.providers.created.push(provider.id)
+        providerIds.add(provider.id)
+      } else {
+        summary.providers.skipped.push(provider.id)
+      }
+    }
+
+    const accountIds = new Set((await accountsAPI.getAll(true)).map((account) => account.id))
+    for (const account of payload.accounts || []) {
+      if (!account?.id || !account.providerId) {
+        summary.accounts.skipped.push(account?.id || 'missing-account-id')
+        continue
+      }
+
+      const existing = accountIds.has(account.id)
+      const updates: Partial<Account> = {
+        name: account.name,
+        email: account.email,
+        dailyLimit: account.dailyLimit,
+        status: account.status,
+        errorMessage: account.errorMessage,
+        healthStatus: account.healthStatus,
+        lastValidatedAt: account.lastValidatedAt,
+        lastValidationError: account.lastValidationError,
+        lastValidationLatency: account.lastValidationLatency,
+      }
+      if (account.credentials && typeof account.credentials === 'object') {
+        updates.credentials = account.credentials
+      }
+
+      if (existing) {
+        if (!dryRun) {
+          await accountsAPI.update(account.id, updates)
+        }
+        summary.accounts.updated.push(account.id)
+      } else {
+        if (!dryRun) {
+          await accountsAPI.add({
+            providerId: account.providerId,
+            name: account.name || account.id,
+            email: account.email,
+            credentials: updates.credentials || {},
+            dailyLimit: account.dailyLimit,
+          })
+        }
+        summary.accounts.created.push(account.id)
+        accountIds.add(account.id)
+      }
+    }
+
+    return { success: true, dryRun, summary }
+  },
+}
+
 const electronAPI = {
   proxy: proxyAPI,
   store: storeAPI,
@@ -647,6 +775,7 @@ const electronAPI = {
   session: sessionAPI,
   managementApi: managementApiAPI,
   contextManagement: contextManagementAPI,
+  dashboard: dashboardAPI,
   tray: trayAPI,
   
   on: (channel: string, callback: (...args: unknown[]) => void) => {

@@ -183,7 +183,12 @@ Notes:
 - Headless mode now includes a minimal browser dashboard workflow for provider/account credential management at `http://<host>:<port>/#/providers`.
 - If `CHAT2API_DASHBOARD_TOKEN` is set, every `/dashboard-api/*` request must include the token via `Authorization: Bearer <token>` or `X-Dashboard-Token: <token>`.
 - Keep headless/dashboard endpoints bound to localhost or another protected network boundary; do not expose dashboard API publicly without protection.
-- This browser flow is intentionally scoped to provider/account CRUD + credential validation (not full desktop parity).
+- The dashboard API includes configuration backup routes:
+  - `GET /dashboard-api/export` (default excludes credentials)
+  - `GET /dashboard-api/export?includeCredentials=1` (includes credentials; sensitive)
+  - `POST /dashboard-api/import` (`dryRun: true` preview supported).
+- Exported credential files are sensitive and effectively equivalent to login/session tokens. Handle and store them like secrets.
+- This browser flow is intentionally scoped to provider/account CRUD + validation + basic import/export (not full desktop parity).
 - See `docs/headless-phase1.md` for architecture notes, run instructions, and current limitations.
 
 ## 📸 Screenshots
