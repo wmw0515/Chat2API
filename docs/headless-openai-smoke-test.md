@@ -2,6 +2,8 @@
 
 This guide provides a minimal smoke test for Chat2API running in **headless server mode**.
 
+For desktop-to-headless credential migration and client integration workflow, see `docs/headless-credential-migration.md`.
+
 It verifies:
 1. The server is reachable (`/health`).
 2. OpenAI-compatible model listing works (`/v1/models`).

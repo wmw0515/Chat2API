@@ -32,6 +32,29 @@ export function DataManagement() {
   const [importPayload, setImportPayload] = useState('')
   const [isImportingProviders, setIsImportingProviders] = useState(false)
 
+  const handleImportProviderAccountFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const text = await file.text()
+      JSON.parse(text)
+      setImportPayload(text)
+      toast({
+        title: t('common.success'),
+        description: 'Loaded JSON file into import textarea.',
+      })
+    } catch {
+      toast({
+        title: t('common.error'),
+        description: 'Invalid JSON file. Please choose a valid export file.',
+        variant: 'destructive',
+      })
+    } finally {
+      event.target.value = ''
+    }
+  }
+
   const handleExportConfig = async () => {
     setIsExporting(true)
     try {
@@ -313,6 +336,18 @@ export function DataManagement() {
 
           <div className="space-y-2">
             <Label htmlFor="provider-account-import-json">Import JSON payload</Label>
+            <div className="relative inline-flex">
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={handleImportProviderAccountFile}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              <Button variant="outline" type="button">
+                <Upload className="mr-2 h-4 w-4" />
+                Import from JSON file
+              </Button>
+            </div>
             <Textarea
               id="provider-account-import-json"
               value={importPayload}
