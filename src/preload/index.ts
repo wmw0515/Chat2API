@@ -167,6 +167,36 @@ const providersAPI = {
     error?: string
   }> => 
     ipcRenderer.invoke(IpcChannels.PROVIDERS_RESET_MODELS, providerId),
+  checkModel: (providerId: string, modelId: string): Promise<{
+    success: boolean
+    providerId: string
+    accountId: string
+    model: string
+    actualModel: string
+    status: 'available' | 'credential_error' | 'model_invalid' | 'connection_error' | 'unknown_error'
+    errorCode?: string
+    errorMessage?: string
+    checkedAt: number
+  }> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_CHECK_MODEL, providerId, modelId),
+  checkAllModels: (providerId: string): Promise<{
+    providerId: string
+    checked: number
+    available: number
+    failed: number
+    results: Array<{
+      success: boolean
+      providerId: string
+      accountId: string
+      model: string
+      actualModel: string
+      status: 'available' | 'credential_error' | 'model_invalid' | 'connection_error' | 'unknown_error'
+      errorCode?: string
+      errorMessage?: string
+      checkedAt: number
+    }>
+  }> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_CHECK_ALL_MODELS, providerId),
 }
 
 const accountsAPI = {
@@ -215,6 +245,18 @@ const accountsAPI = {
     }
   }> => 
     ipcRenderer.invoke(IpcChannels.ACCOUNTS_VALIDATE_TOKEN, providerId, credentials),
+  check: (accountId: string): Promise<{
+    success: boolean
+    providerId: string
+    accountId: string
+    model: string
+    actualModel: string
+    status: 'available' | 'credential_error' | 'model_invalid' | 'connection_error' | 'unknown_error'
+    errorCode?: string
+    errorMessage?: string
+    checkedAt: number
+  }> =>
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_CHECK, accountId),
 
   getCredits: (accountId: string): Promise<{
     totalCredits: number

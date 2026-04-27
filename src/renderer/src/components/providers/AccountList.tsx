@@ -291,7 +291,7 @@ export function AccountList({
                               'mr-2 h-4 w-4',
                               isValidating && 'animate-spin'
                             )} />
-                            {isValidating ? t('oauth.validating') : t('providers.validateCredentials')}
+                            {isValidating ? t('oauth.validating') : t('providers.checkAccount')}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem 

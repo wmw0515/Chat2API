@@ -200,6 +200,7 @@
     "validationSuccess": "验证成功",
     "quota": "配额",
     "validateCredentials": "验证凭证",
+    "checkAccount": "检测账号",
     "clearChats": "清除对话记录",
     "clearChatsConfirm": "确定要清除该账户的所有对话记录吗？",
     "clearChatsWarning": "此操作将删除该供应商网站上的所有对话历史，且无法恢复。",

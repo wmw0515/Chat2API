@@ -234,7 +234,7 @@ export function AccountDetail({
             disabled={isValidating}
           >
             <RefreshCw className={cn('mr-2 h-4 w-4', isValidating && 'animate-spin')} />
-            {isValidating ? t('oauth.validating') : t('providers.validateCredentials')}
+            {isValidating ? t('oauth.validating') : t('providers.checkAccount')}
           </Button>
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Edit className="mr-2 h-4 w-4" />

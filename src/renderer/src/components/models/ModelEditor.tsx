@@ -56,6 +56,8 @@ export function ModelEditor({
   const [isAdding, setIsAdding] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [checkingModel, setCheckingModel] = useState<string | null>(null)
+  const [isCheckingAllModels, setIsCheckingAllModels] = useState(false)
   const [deletingModel, setDeletingModel] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState<{
     supported: boolean
@@ -253,6 +255,64 @@ export function ModelEditor({
     }
   }
 
+  const getCheckToastMessage = (status: string) => {
+    switch (status) {
+      case 'available':
+        return '模型可用'
+      case 'credential_error':
+        return '凭证失效'
+      case 'model_invalid':
+        return '模型无效'
+      case 'connection_error':
+        return '连接异常'
+      default:
+        return '未知错误'
+    }
+  }
+
+  const handleCheckModel = async (modelName: string) => {
+    setCheckingModel(modelName)
+    try {
+      const result = await window.electronAPI.providers.checkModel(providerId, modelName)
+      await loadModels()
+      setModelsLastUpdated(Date.now())
+      toast({
+        title: result.success ? t('common.success') : t('common.error'),
+        description: getCheckToastMessage(result.status),
+        variant: result.success ? 'default' : 'destructive',
+      })
+    } catch (error) {
+      toast({
+        title: t('common.error'),
+        description: error instanceof Error ? error.message : 'Check failed',
+        variant: 'destructive',
+      })
+    } finally {
+      setCheckingModel(null)
+    }
+  }
+
+  const handleCheckAllModels = async () => {
+    setIsCheckingAllModels(true)
+    try {
+      const result = await window.electronAPI.providers.checkAllModels(providerId)
+      await loadModels()
+      setModelsLastUpdated(Date.now())
+      toast({
+        title: t('common.success'),
+        description: `已检测 ${result.checked} 个模型，可用 ${result.available} 个`,
+      })
+    } catch (error) {
+      toast({
+        title: t('common.error'),
+        description: error instanceof Error ? error.message : 'Check failed',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsCheckingAllModels(false)
+    }
+  }
+
   const renderModelTable = (modelList: EffectiveModel[]) => {
     if (modelList.length === 0) {
       return (
@@ -295,7 +355,7 @@ export function ModelEditor({
               <TableHead>{t('modelEditor.lastCheckedAt')}</TableHead>
               <TableHead>{t('modelEditor.lastErrorMessage')}</TableHead>
               <TableHead>{t('modelEditor.source')}</TableHead>
-              <TableHead className="w-[80px]">{t('modelEditor.actions')}</TableHead>
+              <TableHead className="w-[180px]">{t('modelEditor.actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -330,23 +390,34 @@ export function ModelEditor({
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => {
-                        if (window.confirm(t('modelEditor.confirmDelete'))) {
-                          handleRemoveModel(model.displayName)
-                        }
-                      }}
-                      disabled={isDeleting}
-                      className="h-8 w-8 text-destructive hover:text-destructive"
-                    >
-                      {isDeleting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleCheckModel(model.displayName)}
+                        disabled={Boolean(checkingModel) || isCheckingAllModels}
+                      >
+                        {checkingModel === model.displayName ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+                        Check
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          if (window.confirm(t('modelEditor.confirmDelete'))) {
+                            handleRemoveModel(model.displayName)
+                          }
+                        }}
+                        disabled={isDeleting || Boolean(checkingModel) || isCheckingAllModels}
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                      >
+                        {isDeleting ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               )
@@ -405,7 +476,7 @@ export function ModelEditor({
                 <Button
                   variant="outline"
                   onClick={handleResetModels}
-                  disabled={isLoading || isResetting}
+                  disabled={isLoading || isResetting || Boolean(checkingModel) || isCheckingAllModels}
                 >
                   {isResetting ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -424,6 +495,14 @@ export function ModelEditor({
                     {t('modelEditor.syncModels')}
                   </Button>
                 ) : null}
+                <Button
+                  variant="outline"
+                  onClick={handleCheckAllModels}
+                  disabled={isLoading || isCheckingAllModels || Boolean(checkingModel)}
+                >
+                  {isCheckingAllModels ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                  Check all models
+                </Button>
               </div>
               <Button
                 variant="outline"
