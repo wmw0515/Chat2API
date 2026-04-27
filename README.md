@@ -192,6 +192,7 @@ Notes:
 - See `docs/headless-phase1.md` for architecture notes, run instructions, and current limitations.
 - For minimal Linux service deployment, see `docs/headless-systemd.md`.
 - For OpenAI-compatible headless API verification, see `docs/headless-openai-smoke-test.md`.
+- For desktop-to-headless credential migration and client integration workflow, see `docs/headless-credential-migration.md`.
 
 ## 📸 Screenshots
 
