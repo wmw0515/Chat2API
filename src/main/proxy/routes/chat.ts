@@ -22,6 +22,10 @@ import {
   reasoningContentFilterEnabled,
   sanitizeOpenAICompatibleResponseBody,
 } from '../utils/reasoningContentFilter'
+import {
+  classifyProviderError,
+  sanitizeRuntimeErrorMessage,
+} from '../utils/runtimeError'
 
 const router = new Router({ prefix: '/v1/chat' })
 
@@ -195,36 +199,72 @@ router.post('/completions', async (ctx: Context) => {
 
     if (!result.success) {
       proxyStatusManager.recordRequestFailure(latency)
+      const sanitizedErrorMessage = sanitizeRuntimeErrorMessage(result.error || 'Request failed')
+      const errorCategory = classifyProviderError(provider.id, {
+        status: result.status,
+        message: sanitizedErrorMessage,
+      })
 
-      if (result.status && result.status >= 400 && result.status !== 429) {
+      if (errorCategory === 'credential_error') {
         loadBalancer.markAccountFailed(account.id)
       }
+
+      const now = Date.now()
+      const runtimeFailureUpdates = {
+        lastRuntimeFailureAt: now,
+        lastRuntimeErrorCode: errorCategory,
+        lastRuntimeErrorMessage: sanitizedErrorMessage,
+        runtimeFailureCount: (account.runtimeFailureCount || 0) + 1,
+      }
+
+      if (errorCategory === 'credential_error') {
+        storeManager.updateAccount(account.id, {
+          ...runtimeFailureUpdates,
+          healthStatus: 'invalid',
+        })
+      } else if (errorCategory === 'model_invalid') {
+        storeManager.updateAccount(account.id, runtimeFailureUpdates)
+      } else {
+        storeManager.updateAccount(account.id, runtimeFailureUpdates)
+      }
+
+      storeManager.markModelRuntimeFailure(
+        provider.id,
+        request.model,
+        actualModel,
+        errorCategory,
+        sanitizedErrorMessage,
+      )
 
       ctx.status = result.status || 500
       ctx.body = {
         error: {
-          message: result.error || 'Request failed',
+          message: sanitizedErrorMessage,
           type: 'api_error',
           param: null,
-          code: null,
+          code: errorCategory,
         },
       }
 
-      storeManager.addLog('error', `Request failed: ${result.error}`, {
+      storeManager.addLog('error', `Request failed: ${sanitizedErrorMessage}`, {
         requestId,
         providerId: provider.id,
         accountId: account.id,
         model: request.model,
+        actualModel,
+        errorCategory,
+        status: result.status,
+        errorMessage: sanitizedErrorMessage,
         latency,
       })
 
       const userInput = extractUserInput(request.messages)
       const errorResponseBody = JSON.stringify({
         error: {
-          message: result.error || 'Request failed',
+          message: sanitizedErrorMessage,
           type: 'api_error',
           param: null,
-          code: null,
+          code: errorCategory,
         },
       })
       storeManager.addRequestLog({
@@ -247,7 +287,7 @@ router.post('/completions', async (ctx: Context) => {
         responseBody: errorResponseBody,
         latency,
         isStream: request.stream || false,
-        errorMessage: result.error,
+        errorMessage: sanitizedErrorMessage,
       })
 
       storeManager.recordRequestInStats(false, latency, request.model, provider.id, account.id)
@@ -263,7 +303,12 @@ router.post('/completions', async (ctx: Context) => {
       lastUsed: Date.now(),
       requestCount: (account.requestCount || 0) + 1,
       todayUsed: (account.todayUsed || 0) + 1,
+      healthStatus: 'active',
+      lastRuntimeSuccessAt: Date.now(),
+      lastRuntimeErrorCode: undefined,
+      lastRuntimeErrorMessage: undefined,
     })
+    storeManager.markModelRuntimeSuccess(provider.id, request.model, actualModel)
 
     storeManager.addLog('info', `Request succeeded`, {
       requestId,
@@ -353,7 +398,11 @@ router.post('/completions', async (ctx: Context) => {
 
       // Handle stream errors
       result.stream.once('error', (err: Error) => {
-        console.error('[Chat] Stream error:', err.message)
+        const sanitizedErrorMessage = sanitizeRuntimeErrorMessage(err.message)
+        const errorCategory = classifyProviderError(provider.id, {
+          message: sanitizedErrorMessage,
+        })
+        console.error('[Chat] Stream error:', sanitizedErrorMessage)
 
         // Send error as SSE event
         const errorEvent = {
@@ -364,7 +413,7 @@ router.post('/completions', async (ctx: Context) => {
           choices: [{
             index: 0,
             delta: {
-              content: `\n\n[Error: ${err.message}]`,
+              content: `\n\n[Error: ${sanitizedErrorMessage}]`,
             },
             finish_reason: 'stop',
           }],
@@ -374,11 +423,14 @@ router.post('/completions', async (ctx: Context) => {
         wrapperStream.write('data: [DONE]\n\n')
         wrapperStream.end()
 
-        storeManager.addLog('error', `Stream error: ${err.message}`, {
+        storeManager.addLog('error', `Stream error: ${sanitizedErrorMessage}`, {
           requestId,
           providerId: provider.id,
           accountId: account.id,
           model: request.model,
+          actualModel,
+          errorCategory,
+          errorMessage: sanitizedErrorMessage,
         })
       })
 
@@ -483,34 +535,50 @@ router.post('/completions', async (ctx: Context) => {
     proxyStatusManager.recordRequestFailure(latency)
 
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const sanitizedErrorMessage = sanitizeRuntimeErrorMessage(errorMessage)
+    const errorCategory = classifyProviderError(provider.id, {
+      message: sanitizedErrorMessage,
+    })
     const errorStack = error instanceof Error ? error.stack : undefined
 
     ctx.status = 500
     ctx.body = {
       error: {
-        message: errorMessage,
-        type: 'internal_error',
+        message: sanitizedErrorMessage,
+        type: 'api_error',
         param: null,
-        code: null,
+        code: errorCategory,
       },
     }
 
-    storeManager.addLog('error', `Request exception: ${errorMessage}`, {
+    storeManager.updateAccount(account.id, {
+      ...(errorCategory === 'credential_error' ? { healthStatus: 'invalid' as const } : {}),
+      lastRuntimeFailureAt: Date.now(),
+      lastRuntimeErrorCode: errorCategory,
+      lastRuntimeErrorMessage: sanitizedErrorMessage,
+      runtimeFailureCount: (account.runtimeFailureCount || 0) + 1,
+    })
+    storeManager.markModelRuntimeFailure(provider.id, request.model, actualModel, errorCategory, sanitizedErrorMessage)
+
+    storeManager.addLog('error', `Request exception: ${sanitizedErrorMessage}`, {
       requestId,
       providerId: provider.id,
       accountId: account.id,
       model: request.model,
+      actualModel,
+      errorCategory,
+      errorMessage: sanitizedErrorMessage,
       latency,
-      error: errorMessage,
+      status: 500,
     })
 
     const userInput = extractUserInput(request.messages)
     const exceptionResponseBody = JSON.stringify({
       error: {
-        message: errorMessage,
-        type: 'internal_error',
+        message: sanitizedErrorMessage,
+        type: 'api_error',
         param: null,
-        code: null,
+        code: errorCategory,
       },
     })
     storeManager.addRequestLog({
@@ -533,7 +601,7 @@ router.post('/completions', async (ctx: Context) => {
       responseBody: exceptionResponseBody,
       latency,
       isStream: request.stream || false,
-      errorMessage,
+      errorMessage: sanitizedErrorMessage,
       errorStack,
     })
 

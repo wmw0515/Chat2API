@@ -262,6 +262,28 @@ export function ModelEditor({
       )
     }
 
+    const formatHealthStatus = (status?: string) => {
+      switch (status) {
+        case 'available':
+          return '有效'
+        case 'credential_error':
+          return '凭证失效'
+        case 'model_invalid':
+          return '模型无效'
+        case 'connection_error':
+          return '连接异常'
+        case 'unknown_error':
+          return '未知错误'
+        default:
+          return '未知'
+      }
+    }
+
+    const formatTimestamp = (value?: number) => {
+      if (!value) return '-'
+      return new Date(value).toLocaleString()
+    }
+
     return (
       <div className="border rounded-lg">
         <Table>
@@ -269,6 +291,9 @@ export function ModelEditor({
             <TableRow>
               <TableHead>{t('modelEditor.displayName')}</TableHead>
               <TableHead>{t('modelEditor.actualModelId')}</TableHead>
+              <TableHead>{t('modelEditor.healthStatus')}</TableHead>
+              <TableHead>{t('modelEditor.lastCheckedAt')}</TableHead>
+              <TableHead>{t('modelEditor.lastErrorMessage')}</TableHead>
               <TableHead>{t('modelEditor.source')}</TableHead>
               <TableHead className="w-[80px]">{t('modelEditor.actions')}</TableHead>
             </TableRow>
@@ -287,6 +312,17 @@ export function ModelEditor({
                     <code className="text-sm">
                       {showBoth ? model.actualModelId : model.displayName}
                     </code>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="text-xs">
+                      {formatHealthStatus(model.runtimeHealth?.status)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {formatTimestamp(model.runtimeHealth?.lastCheckedAt)}
+                  </TableCell>
+                  <TableCell className="max-w-[220px] truncate text-xs text-muted-foreground" title={model.runtimeHealth?.lastErrorMessage || ''}>
+                    {model.runtimeHealth?.lastErrorMessage || '-'}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="text-xs">

@@ -10,6 +10,8 @@ import type { ProviderStatus } from '../../shared/types'
  */
 export type AccountStatus = 'active' | 'inactive' | 'expired' | 'error'
 export type AccountHealthStatus = 'unknown' | 'active' | 'invalid' | 'expired' | 'rate_limited' | 'network_error' | 'error'
+export type RuntimeErrorCode = 'credential_error' | 'model_invalid' | 'connection_error' | 'unknown_error'
+export type ModelRuntimeStatus = 'unknown' | 'available' | RuntimeErrorCode
 
 /**
  * Provider Type Enum
@@ -122,6 +124,16 @@ export interface Account {
   lastValidationError?: string
   /** Last manual validation latency (milliseconds) */
   lastValidationLatency?: number
+  /** Last runtime success timestamp */
+  lastRuntimeSuccessAt?: number
+  /** Last runtime failure timestamp */
+  lastRuntimeFailureAt?: number
+  /** Last runtime error category */
+  lastRuntimeErrorCode?: RuntimeErrorCode
+  /** Last runtime error message (sanitized) */
+  lastRuntimeErrorMessage?: string
+  /** Runtime failure count */
+  runtimeFailureCount?: number
 }
 
 /**
@@ -631,7 +643,24 @@ export interface EffectiveModel {
   isCustom: boolean
   /** Model source */
   source?: 'static' | 'discovered' | 'manual'
+  /** Passive runtime health info */
+  runtimeHealth?: ModelRuntimeHealth
 }
+
+export interface ModelRuntimeHealth {
+  providerId: string
+  displayName: string
+  actualModelId: string
+  status: ModelRuntimeStatus
+  lastCheckedAt?: number
+  lastSuccessAt?: number
+  lastFailureAt?: number
+  lastErrorCode?: RuntimeErrorCode
+  lastErrorMessage?: string
+  failureCount?: number
+}
+
+export type ProviderModelRuntimeHealths = Record<string, ModelRuntimeHealth>
 
 export interface ProviderModelCatalogEntry {
   displayName: string
@@ -673,6 +702,8 @@ export interface StoreSchema {
   userModelOverrides: UserModelOverrides
   /** Provider dynamic model catalogs */
   providerModelCatalogs: ProviderModelCatalogs
+  /** Passive runtime health per provider/model */
+  providerModelRuntimeHealths: ProviderModelRuntimeHealths
 }
 
 /**
@@ -705,6 +736,7 @@ export const DEFAULT_STATISTICS: PersistentStatistics = {
  */
 export const DEFAULT_USER_MODEL_OVERRIDES: UserModelOverrides = {}
 export const DEFAULT_PROVIDER_MODEL_CATALOGS: ProviderModelCatalogs = {}
+export const DEFAULT_PROVIDER_MODEL_RUNTIME_HEALTHS: ProviderModelRuntimeHealths = {}
 
 /**
  * Default Tool Prompt Configuration
