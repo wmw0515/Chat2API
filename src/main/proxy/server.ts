@@ -15,6 +15,10 @@ import { sessionManager } from './sessionManager'
 import ProviderManager from '../store/providers'
 import AccountManager from '../store/accounts'
 import ConfigManager from '../store/config'
+import { CustomProviderManager } from '../providers/custom'
+import { getBuiltinProvider, getBuiltinProviders } from '../providers/builtin'
+import { ProviderChecker } from '../providers/checker'
+import type { Account, AuthType, CredentialField, Provider } from '../../shared/types'
 import fs from 'node:fs'
 import path from 'node:path'
 import mime from 'mime-types'
@@ -234,12 +238,148 @@ export class ProxyServer {
       ctx.body = ProviderManager.getAll()
     })
 
+    this.router.post('/dashboard-api/providers', async (ctx) => {
+      const data = (ctx.request.body || {}) as {
+        id?: string
+        name: string
+        type?: 'builtin' | 'custom'
+        authType: AuthType
+        apiEndpoint: string
+        headers?: Record<string, string>
+        description?: string
+        supportedModels?: string[]
+        credentialFields?: CredentialField[]
+      }
+
+      ctx.body = CustomProviderManager.create(data)
+    })
+
+    this.router.put('/dashboard-api/providers/:id', async (ctx) => {
+      const id = String(ctx.params.id || '')
+      const updates = (ctx.request.body || {}) as Partial<Provider>
+      const provider = ProviderManager.update(id, updates)
+
+      if (!provider) {
+        ctx.status = 404
+        ctx.body = {
+          success: false,
+          error: 'Provider not found',
+        }
+        return
+      }
+
+      ctx.body = provider
+    })
+
+    this.router.delete('/dashboard-api/providers/:id', async (ctx) => {
+      const id = String(ctx.params.id || '')
+      ctx.body = CustomProviderManager.delete(id)
+    })
+
     this.router.get('/dashboard-api/providers/builtin', async (ctx) => {
-      ctx.body = ProviderManager.getBuiltin()
+      ctx.body = getBuiltinProviders()
     })
 
     this.router.get('/dashboard-api/accounts', async (ctx) => {
-      ctx.body = AccountManager.getAll(false)
+      const includeCredentials = String(ctx.query.includeCredentials || 'false') === 'true'
+      ctx.body = AccountManager.getAll(includeCredentials)
+    })
+
+    this.router.get('/dashboard-api/accounts/:id', async (ctx) => {
+      const id = String(ctx.params.id || '')
+      const includeCredentials = String(ctx.query.includeCredentials || 'false') === 'true'
+      const account = AccountManager.getById(id, includeCredentials)
+
+      if (!account) {
+        ctx.status = 404
+        ctx.body = null
+        return
+      }
+
+      ctx.body = account
+    })
+
+    this.router.post('/dashboard-api/accounts', async (ctx) => {
+      const data = (ctx.request.body || {}) as {
+        providerId: string
+        name: string
+        email?: string
+        credentials: Record<string, string>
+        dailyLimit?: number
+      }
+
+      ctx.body = AccountManager.create(data)
+    })
+
+    this.router.put('/dashboard-api/accounts/:id', async (ctx) => {
+      const id = String(ctx.params.id || '')
+      const updates = (ctx.request.body || {}) as Partial<Account>
+      const account = AccountManager.update(id, updates)
+
+      if (!account) {
+        ctx.status = 404
+        ctx.body = null
+        return
+      }
+
+      ctx.body = account
+    })
+
+    this.router.delete('/dashboard-api/accounts/:id', async (ctx) => {
+      const id = String(ctx.params.id || '')
+      ctx.body = AccountManager.delete(id)
+    })
+
+    this.router.post('/dashboard-api/accounts/:id/validate', async (ctx) => {
+      const id = String(ctx.params.id || '')
+      const result = await AccountManager.validate(id)
+      ctx.body = result.valid
+    })
+
+    this.router.post('/dashboard-api/accounts/validate-token', async (ctx) => {
+      const { providerId, credentials } = (ctx.request.body || {}) as {
+        providerId: string
+        credentials: Record<string, string>
+      }
+
+      let provider = ProviderManager.getById(providerId)
+      if (!provider) {
+        const builtinConfig = getBuiltinProvider(providerId)
+        if (builtinConfig) {
+          provider = {
+            id: builtinConfig.id,
+            name: builtinConfig.name,
+            type: 'builtin',
+            authType: builtinConfig.authType,
+            apiEndpoint: builtinConfig.apiEndpoint,
+            headers: builtinConfig.headers,
+            enabled: true,
+            description: builtinConfig.description,
+            supportedModels: builtinConfig.supportedModels || [],
+            modelMappings: builtinConfig.modelMappings || {},
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          }
+        }
+      }
+
+      if (!provider) {
+        ctx.status = 404
+        ctx.body = { valid: false, error: 'Provider not found' }
+        return
+      }
+
+      const tempAccount: Account = {
+        id: 'temp',
+        providerId,
+        name: 'temp',
+        credentials: credentials || {},
+        status: 'active',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+
+      ctx.body = await ProviderChecker.checkAccountToken(provider, tempAccount)
     })
 
     this.router.get('/dashboard-api/statistics', async (ctx) => {

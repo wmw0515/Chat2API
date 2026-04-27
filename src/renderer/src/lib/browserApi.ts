@@ -47,10 +47,23 @@ export function installBrowserApiShim() {
     providers: {
       getAll: () => request('/providers'),
       getBuiltin: () => request('/providers/builtin'),
+      add: (data: any) => request('/providers', { method: 'POST', body: data }),
+      update: (id: string, updates: any) => request(`/providers/${id}`, { method: 'PUT', body: updates }),
+      delete: (id: string) => request(`/providers/${id}`, { method: 'DELETE' }),
       checkAllStatus: async () => ({}),
     },
     accounts: {
-      getAll: () => request('/accounts'),
+      getAll: (includeCredentials?: boolean) => request(`/accounts?includeCredentials=${includeCredentials ? 'true' : 'false'}`),
+      getById: (id: string, includeCredentials?: boolean) => request(`/accounts/${id}?includeCredentials=${includeCredentials ? 'true' : 'false'}`),
+      add: (data: any) => request('/accounts', { method: 'POST', body: data }),
+      update: (id: string, updates: any) => request(`/accounts/${id}`, { method: 'PUT', body: updates }),
+      delete: (id: string) => request(`/accounts/${id}`, { method: 'DELETE' }),
+      validate: (accountId: string) => request(`/accounts/${accountId}/validate`, { method: 'POST' }),
+      validateToken: (providerId: string, credentials: Record<string, string>) => request('/accounts/validate-token', {
+        method: 'POST',
+        body: { providerId, credentials },
+      }),
+      clearChats: async () => ({ success: false, error: 'Not supported in headless web mode yet' }),
     },
     logs: {
       get: (options?: { limit?: number }) => request(`/logs?limit=${options?.limit || 50}`),
