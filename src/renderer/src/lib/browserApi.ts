@@ -115,6 +115,14 @@ export function installBrowserApiShim() {
         request(`/providers/${providerId}/models/check-all`, { method: 'POST' }),
       getHealthSchedulerStatus: () =>
         request('/providers/health-check-scheduler-status'),
+      getHealthSchedulerConfig: () =>
+        request('/health-check-scheduler/config'),
+      updateHealthSchedulerConfig: (config: {
+        enabled: boolean
+        minIntervalHours: number
+        maxIntervalHours: number
+      }) =>
+        request('/health-check-scheduler/config', { method: 'PUT', body: config }),
       duplicate: async () => {
         throw new Error('Duplicate provider is not supported in browser headless mode')
       },

@@ -257,6 +257,8 @@ export interface AppConfig {
   managementApi: ManagementApiConfig
   /** Context management configuration */
   contextManagement: ContextManagementConfig
+  /** Scheduled health-check scheduler configuration */
+  healthCheckScheduler: HealthCheckSchedulerConfig
 }
 
 /**
@@ -418,6 +420,18 @@ export interface ManagementApiConfig {
   managementApiSecret: string
   /** Management API port (optional, defaults to proxyPort) */
   managementApiPort?: number
+}
+
+/**
+ * Scheduled health-check scheduler configuration
+ */
+export interface HealthCheckSchedulerConfig {
+  /** Whether scheduled health checks are enabled */
+  enabled: boolean
+  /** Minimum scheduling interval in hours */
+  minIntervalHours: number
+  /** Maximum scheduling interval in hours */
+  maxIntervalHours: number
 }
 
 /**
@@ -823,6 +837,11 @@ export const DEFAULT_CONFIG: AppConfig = {
   toolPromptConfig: DEFAULT_TOOL_PROMPT_CONFIG,
   managementApi: DEFAULT_MANAGEMENT_API_CONFIG,
   contextManagement: DEFAULT_CONTEXT_MANAGEMENT_CONFIG,
+  healthCheckScheduler: {
+    enabled: false,
+    minIntervalHours: 12,
+    maxIntervalHours: 24,
+  },
 }
 
 /**

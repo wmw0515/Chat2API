@@ -586,6 +586,31 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     return healthCheckService.getSchedulerStatus()
   })
 
+  ipcMain.handle(IpcChannels.PROVIDERS_GET_HEALTH_SCHEDULER_CONFIG, async () => {
+    return healthCheckService.getSchedulerStatus()
+  })
+
+  ipcMain.handle(IpcChannels.PROVIDERS_UPDATE_HEALTH_SCHEDULER_CONFIG, async (_, updates: {
+    enabled: boolean
+    minIntervalHours: number
+    maxIntervalHours: number
+  }) => {
+    if (!Number.isFinite(updates.minIntervalHours) || !Number.isFinite(updates.maxIntervalHours)) {
+      throw new Error('minIntervalHours and maxIntervalHours must be valid numbers')
+    }
+    if (updates.minIntervalHours < 1 || updates.maxIntervalHours < 1) {
+      throw new Error('minIntervalHours and maxIntervalHours must be >= 1')
+    }
+    if (updates.maxIntervalHours < updates.minIntervalHours) {
+      throw new Error('maxIntervalHours must be greater than or equal to minIntervalHours')
+    }
+    return healthCheckService.updateSchedulerConfig({
+      enabled: Boolean(updates.enabled),
+      minIntervalHours: Math.floor(updates.minIntervalHours),
+      maxIntervalHours: Math.floor(updates.maxIntervalHours),
+    })
+  })
+
   ipcMain.handle(IpcChannels.ACCOUNTS_GET_ALL, async (_, includeCredentials?: boolean): Promise<Account[]> => {
     return AccountManager.getAll(includeCredentials)
   })
