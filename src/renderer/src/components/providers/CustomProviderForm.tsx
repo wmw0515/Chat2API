@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Switch } from '@/components/ui/switch'
 import {
   Select,
@@ -366,6 +367,13 @@ export function CustomProviderForm({
                   </Badge>
                 ))}
               </div>
+              {formData.supportedModels.length === 0 && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    {t('providers.customProviderModelRoutingWarning')}
+                  </AlertDescription>
+                </Alert>
+              )}
             </div>
 
             <div className="space-y-4">

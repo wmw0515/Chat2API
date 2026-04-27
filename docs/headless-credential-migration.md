@@ -94,6 +94,7 @@ If deployed behind reverse proxy, use your proxy URL and make sure it ends with 
 - If Chat2API API key auth is enabled for `/v1/*`, clients must send `Authorization: Bearer <chat2api-api-key>`.
 - Hermes/OpenClaw feature behavior can depend on model tool/function-call compatibility.
 - Web-login providers may vary in tool/function support and can change behavior over time.
+- Custom providers must configure at least one supported model, otherwise they will not be routable for `/v1/chat/completions` and will not appear in `/v1/models`.
 
 ## Provider migration checklist
 

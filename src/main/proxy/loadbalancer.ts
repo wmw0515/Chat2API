@@ -136,6 +136,11 @@ export class LoadBalancer {
    */
   private providerSupportsModel(provider: Provider, model: string): boolean {
     const effectiveModels = storeManager.getEffectiveModels(provider.id)
+    if (provider.type === 'custom' && effectiveModels.length === 0) {
+      console.log(`[LoadBalancer] Custom provider ${provider.name} has no effective models; skipping model ${model}`)
+      return false
+    }
+
     if (effectiveModels.length === 0) {
       return true
     }
@@ -157,11 +162,9 @@ export class LoadBalancer {
     const globalMapping = config.modelMappings[model]
     if (globalMapping) {
       if (globalMapping.preferredProviderId) {
-        if (globalMapping.preferredProviderId === provider.id) {
-          console.log(`[LoadBalancer] Model "${model}" matched preferred provider ${provider.name}`)
-          return true
+        if (globalMapping.preferredProviderId !== provider.id) {
+          return false
         }
-        return false
       }
       
       const actualModel = globalMapping.actualModel
@@ -175,8 +178,16 @@ export class LoadBalancer {
       })
       
       if (actualSupported) {
-        console.log(`[LoadBalancer] Model "${model}" (actualModel: "${actualModel}") supported by ${provider.name}`)
+        if (globalMapping.preferredProviderId === provider.id) {
+          console.log(`[LoadBalancer] Model "${model}" matched preferred provider ${provider.name} with resolvable model "${actualModel}"`)
+        } else {
+          console.log(`[LoadBalancer] Model "${model}" (actualModel: "${actualModel}") supported by ${provider.name}`)
+        }
         return true
+      }
+
+      if (globalMapping.preferredProviderId === provider.id) {
+        console.log(`[LoadBalancer] Model "${model}" preferred provider ${provider.name} cannot resolve actual model "${actualModel}"`)
       }
     }
     

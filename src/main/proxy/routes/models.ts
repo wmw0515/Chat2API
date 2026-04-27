@@ -8,7 +8,6 @@ import type { Context } from 'koa'
 import { ModelsResponse, ModelInfo } from '../types'
 import { loadBalancer } from '../loadbalancer'
 import { storeManager } from '../../store/store'
-import { modelMapper } from '../modelMapper'
 
 const router = new Router({ prefix: '/v1' })
 
@@ -45,6 +44,11 @@ router.get('/models', async (ctx: Context) => {
   const config = storeManager.getConfig()
   const mappings = config.modelMappings || {}
   for (const [requestModel, mapping] of Object.entries(mappings)) {
+    const availableCount = loadBalancer.getAvailableAccountCount(requestModel, mapping.preferredProviderId)
+    if (availableCount === 0) {
+      continue
+    }
+
     if (!addedModels.has(requestModel)) {
       addedModels.add(requestModel)
       models.push({
@@ -74,6 +78,21 @@ router.get('/models/:model', async (ctx: Context) => {
   const config = storeManager.getConfig()
   const mappings = config.modelMappings || {}
   if (mappings[modelId]) {
+    const mapping = mappings[modelId]
+    const availableCount = loadBalancer.getAvailableAccountCount(modelId, mapping.preferredProviderId)
+    if (availableCount === 0) {
+      ctx.status = 404
+      ctx.body = {
+        error: {
+          message: `Model '${modelId}' not found`,
+          type: 'invalid_request_error',
+          param: 'model',
+          code: 'model_not_found',
+        },
+      }
+      return
+    }
+
     ctx.set('Content-Type', 'application/json')
     ctx.body = {
       id: modelId,

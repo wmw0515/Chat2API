@@ -73,6 +73,7 @@
     "descriptionPlaceholder": "输入描述（可选）",
     "supportedModels": "支持的模型",
     "supportedModelsHelp": "点击添加或移除模型",
+    "customProviderModelRoutingWarning": "自定义供应商需要至少配置一个模型，否则不会参与 /v1/chat/completions 请求调度。",
     "models": "模型",
     "modelNamePlaceholder": "输入模型名称",
     "headersConfig": "请求头配置",
