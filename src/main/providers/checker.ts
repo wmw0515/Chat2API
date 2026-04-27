@@ -230,7 +230,7 @@ export class ProviderChecker {
 
   private static async checkDeepSeekToken(token: string): Promise<TokenCheckResult> {
     try {
-      console.log('[DeepSeek] Validating Token:', token.substring(0, 20) + '...')
+      console.log('[DeepSeek] Validating token for DeepSeek account')
       
       const response = await axios.get(
         'https://chat.deepseek.com/api/v0/users/current',
