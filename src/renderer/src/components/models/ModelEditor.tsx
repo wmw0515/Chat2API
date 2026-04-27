@@ -471,8 +471,8 @@ export function ModelEditor({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[95vw] max-w-6xl max-h-[85vh] overflow-hidden">
-          <DialogHeader>
+        <DialogContent className="w-[95vw] max-w-6xl h-[85vh] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
             <DialogTitle>
               {t('modelEditor.title', { name: providerName })}
             </DialogTitle>
@@ -486,7 +486,7 @@ export function ModelEditor({
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            <div className="space-y-6 mt-4 overflow-y-auto pr-1">
+            <div className="flex-1 min-h-0 mt-4 space-y-6 overflow-y-auto pr-1">
               {renderModelTable(sortedModels)}
 
 
@@ -511,7 +511,7 @@ export function ModelEditor({
             </div>
           )}
 
-          <DialogFooter className="mt-6">
+          <DialogFooter className="mt-4 shrink-0">
             <div className="flex gap-2 w-full justify-between">
               <div className="flex gap-2">
                 <Button
