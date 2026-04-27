@@ -40,12 +40,15 @@ Security note:
 - For development, you can leave `CHAT2API_DASHBOARD_TOKEN` unset.
 - For headless/server use, set `CHAT2API_DASHBOARD_TOKEN` so dashboard API routes are protected.
 - The dashboard API should not be exposed publicly without token protection and an additional network boundary (for example, localhost-only bind or trusted private network).
+- Backup files generated with `includeCredentials=1` are sensitive and equivalent to active login/session tokens. Store and transfer them as secrets.
 
 
 - Open dashboard in browser.
 - View providers and accounts.
 - Add/update/delete providers and accounts.
 - Validate credentials (per-account and pre-save token validation).
+- Export provider/account backup from `/dashboard-api/export` (credentials excluded by default).
+- Import provider/account backup via `/dashboard-api/import` with optional `dryRun: true`.
 - Persist data through the same store used by desktop/headless runtimes.
 
 Recommended run/test flow:
@@ -60,6 +63,7 @@ npm run start:headless
 ## Current limitations (intentionally out of scope)
 
 - Browser/headless mode is intentionally not full dashboard parity (proxy settings, models, logs, sessions, about, and advanced desktop UX remain desktop-focused).
+- Import-export scope remains minimal (no cloud backup, no Google Drive integration, no scheduled jobs, no encryption redesign).
 - No full OAuth browser automation migration for web mode.
 - Storage encryption differs by runtime:
   - Electron mode uses `safeStorage`.

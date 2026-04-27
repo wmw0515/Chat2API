@@ -20,6 +20,7 @@ import { validateCredentials } from '../store/validator'
 import fs from 'node:fs'
 import path from 'node:path'
 import mime from 'mime-types'
+import type { Account, Provider } from '../store/types'
 
 /**
  * Proxy Server Class
@@ -237,6 +238,72 @@ export class ProxyServer {
         return { message: error.message, code: 'dashboard_request_failed' }
       }
       return { message: 'Unknown error', code: 'dashboard_request_failed' }
+    }
+
+    type DashboardExportAccount = Omit<Account, 'credentials'> & { credentials?: Record<string, string> }
+    type DashboardExportPayload = {
+      version: string
+      exportedAt: string
+      includeCredentials: boolean
+      providers: Provider[]
+      accounts: DashboardExportAccount[]
+    }
+
+    const toDashboardExport = (includeCredentials: boolean): DashboardExportPayload => {
+      const providers = ProviderManager.getAll()
+      const accounts = AccountManager.getAll(includeCredentials)
+
+      return {
+        version: rootInfoResponse.version,
+        exportedAt: new Date().toISOString(),
+        includeCredentials,
+        providers,
+        accounts: accounts.map((account) => {
+          if (includeCredentials) {
+            return account
+          }
+          const { credentials: _credentials, ...safeAccount } = account
+          return safeAccount
+        }),
+      }
+    }
+
+    const getSanitizedProviderImportPayload = (provider: Partial<Provider>): Record<string, unknown> => {
+      const allowedFields = [
+        'name',
+        'authType',
+        'apiEndpoint',
+        'chatPath',
+        'headers',
+        'enabled',
+        'description',
+        'icon',
+        'supportedModels',
+        'modelMappings',
+        'credentialFields',
+      ]
+
+      return Object.fromEntries(
+        Object.entries(provider).filter(([key]) => allowedFields.includes(key)),
+      )
+    }
+
+    const getSanitizedAccountImportPayload = (account: Partial<Account>): Record<string, unknown> => {
+      const allowedFields = [
+        'name',
+        'email',
+        'dailyLimit',
+        'status',
+        'errorMessage',
+        'healthStatus',
+        'lastValidatedAt',
+        'lastValidationError',
+        'lastValidationLatency',
+      ]
+
+      return Object.fromEntries(
+        Object.entries(account).filter(([key]) => allowedFields.includes(key)),
+      )
     }
 
     const withDashboardErrorHandling = (handler: (ctx: Context) => Promise<void> | void) => {
@@ -491,6 +558,147 @@ export class ProxyServer {
       const days = Number.parseInt(String(ctx.query.days || '7'), 10)
       ctx.body = storeManager.getRequestLogTrend(Number.isFinite(days) ? days : 7)
     })
+
+    this.router.get('/dashboard-api/export', withDashboardErrorHandling(async (ctx) => {
+      const includeCredentials = String(ctx.query.includeCredentials || '0') === '1'
+      ctx.body = toDashboardExport(includeCredentials)
+    }))
+
+    this.router.post('/dashboard-api/import', withDashboardErrorHandling(async (ctx) => {
+      const body = (ctx.request.body || {}) as any
+      const dryRun = Boolean(body?.dryRun)
+      const payload = body?.data && typeof body.data === 'object' ? body.data : body
+
+      if (!payload || !Array.isArray(payload.providers) || !Array.isArray(payload.accounts)) {
+        ctx.status = 400
+        ctx.body = {
+          success: false,
+          error: { code: 'invalid_import_payload', message: 'providers and accounts arrays are required' },
+        }
+        return
+      }
+
+      const providerSummary = { created: [] as string[], updated: [] as string[], skipped: [] as string[] }
+      const accountSummary = { created: [] as string[], updated: [] as string[], skipped: [] as string[] }
+
+      for (const importedProviderRaw of payload.providers as Partial<Provider>[]) {
+        if (!importedProviderRaw?.id) {
+          providerSummary.skipped.push('missing-provider-id')
+          continue
+        }
+
+        const existing = ProviderManager.getById(importedProviderRaw.id)
+        const importedType = importedProviderRaw.type || 'custom'
+
+        if (!existing && importedType === 'builtin') {
+          if (!dryRun) {
+            storeManager.ensureProviderExists(importedProviderRaw.id)
+          }
+          providerSummary.skipped.push(importedProviderRaw.id)
+          continue
+        }
+
+        if (!existing && importedType !== 'custom') {
+          providerSummary.skipped.push(importedProviderRaw.id)
+          continue
+        }
+
+        if (!existing) {
+          const createPayload = getSanitizedProviderImportPayload(importedProviderRaw) as any
+          if (!createPayload.name || !createPayload.authType || !createPayload.apiEndpoint) {
+            providerSummary.skipped.push(importedProviderRaw.id)
+            continue
+          }
+
+          if (!dryRun) {
+            ProviderManager.create({
+              ...createPayload,
+              id: importedProviderRaw.id,
+              type: 'custom',
+            })
+          }
+          providerSummary.created.push(importedProviderRaw.id)
+          continue
+        }
+
+        if (existing.type === 'builtin' && importedType === 'builtin') {
+          providerSummary.skipped.push(importedProviderRaw.id)
+          continue
+        }
+
+        const updates = getSanitizedProviderImportPayload(importedProviderRaw)
+        if (!dryRun) {
+          ProviderManager.update(importedProviderRaw.id, updates as any)
+        }
+        providerSummary.updated.push(importedProviderRaw.id)
+      }
+
+      for (const importedAccountRaw of payload.accounts as Partial<Account>[]) {
+        if (!importedAccountRaw?.id || !importedAccountRaw.providerId) {
+          accountSummary.skipped.push(importedAccountRaw?.id || 'missing-account-id')
+          continue
+        }
+
+        const provider = ProviderManager.getById(importedAccountRaw.providerId)
+        if (!provider) {
+          accountSummary.skipped.push(importedAccountRaw.id)
+          continue
+        }
+
+        const existing = AccountManager.getById(importedAccountRaw.id, true)
+        const hasCredentials = importedAccountRaw.credentials && typeof importedAccountRaw.credentials === 'object'
+        const baseUpdates = getSanitizedAccountImportPayload(importedAccountRaw)
+        const accountUpdates = hasCredentials
+          ? { ...baseUpdates, credentials: importedAccountRaw.credentials }
+          : baseUpdates
+
+        if (existing) {
+          if (existing.providerId !== importedAccountRaw.providerId) {
+            accountSummary.skipped.push(importedAccountRaw.id)
+            continue
+          }
+
+          if (!dryRun) {
+            AccountManager.update(importedAccountRaw.id, accountUpdates as any)
+          }
+          accountSummary.updated.push(importedAccountRaw.id)
+          continue
+        }
+
+        if (!dryRun) {
+          const now = Date.now()
+          storeManager.addAccount({
+            id: importedAccountRaw.id,
+            providerId: importedAccountRaw.providerId,
+            name: importedAccountRaw.name || importedAccountRaw.id,
+            email: importedAccountRaw.email,
+            credentials: hasCredentials ? importedAccountRaw.credentials! : {},
+            status: importedAccountRaw.status || 'inactive',
+            createdAt: now,
+            updatedAt: now,
+            errorMessage: importedAccountRaw.errorMessage,
+            dailyLimit: importedAccountRaw.dailyLimit,
+            requestCount: importedAccountRaw.requestCount,
+            todayUsed: importedAccountRaw.todayUsed,
+            healthStatus: importedAccountRaw.healthStatus || 'unknown',
+            lastValidatedAt: importedAccountRaw.lastValidatedAt,
+            lastValidationError: importedAccountRaw.lastValidationError,
+            lastValidationLatency: importedAccountRaw.lastValidationLatency,
+            lastUsed: importedAccountRaw.lastUsed,
+          })
+        }
+        accountSummary.created.push(importedAccountRaw.id)
+      }
+
+      ctx.body = {
+        success: true,
+        dryRun,
+        summary: {
+          providers: providerSummary,
+          accounts: accountSummary,
+        },
+      }
+    }))
 
     // Management API enable check middleware
     // This must be registered before management routes
