@@ -108,9 +108,14 @@ export class DeepSeekAdapter {
   constructor(provider: Provider, account: Account) {
     this.provider = provider
     this.account = account
-    console.log('[DeepSeek] Account credentials:', JSON.stringify(account.credentials, null, 2))
+    console.log('[DeepSeek] Account credential metadata:', {
+      accountId: account.id,
+      providerId: provider.id,
+      credentialFieldNames: Object.keys(account.credentials || {}),
+      credentialKeyCount: Object.keys(account.credentials || {}).length,
+    })
     this.token = account.credentials.token || account.credentials.apiKey || account.credentials.refreshToken || ''
-    console.log('[DeepSeek] Using token:', this.token.substring(0, 20) + '...')
+    console.log('[DeepSeek] Token configured:', Boolean(this.token))
   }
 
   private async acquireToken(): Promise<string> {

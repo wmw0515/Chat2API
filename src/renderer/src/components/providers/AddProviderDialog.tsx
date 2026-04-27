@@ -57,7 +57,11 @@ const providerIcons: Record<string, string> = {
 }
 
 function mapOAuthCredentials(providerId: string | undefined, credentials: Record<string, string>): Record<string, string> {
-  console.log('[mapOAuthCredentials] Input providerId:', providerId, 'credentials:', JSON.stringify(credentials, null, 2))
+  console.log('[mapOAuthCredentials] Input metadata:', {
+    providerId,
+    credentialFieldNames: Object.keys(credentials),
+    credentialKeyCount: Object.keys(credentials).length,
+  })
   
   if (!providerId) {
     console.log('[mapOAuthCredentials] No providerId, returning as-is')
@@ -139,7 +143,10 @@ function mapOAuthCredentials(providerId: string | undefined, credentials: Record
       console.log('[mapOAuthCredentials] Using existing ph_token')
     }
     
-    console.log('[mapOAuthCredentials] Mimo result:', JSON.stringify(result, null, 2))
+    console.log('[mapOAuthCredentials] Mimo result metadata:', {
+      credentialFieldNames: Object.keys(result),
+      credentialKeyCount: Object.keys(result).length,
+    })
     return result
   }
 
@@ -539,13 +546,17 @@ export function AddProviderDialog({
         selectedProviderData.id as ProviderVendor
       )
       
-      console.log('[AddProviderDialog] OAuth result:', JSON.stringify(result, null, 2))
+      console.log('[AddProviderDialog] OAuth result metadata:', {
+        success: Boolean(result?.success),
+        hasCredentials: Boolean(result?.credentials),
+      })
       
       if (result?.success && result.credentials) {
-        console.log('[AddProviderDialog] OAuth success, credentials:', JSON.stringify(result.credentials, null, 2))
-        
         const mappedCredentials = mapOAuthCredentials(selectedProviderData?.id, result.credentials)
-        console.log('[AddProviderDialog] Mapped credentials:', JSON.stringify(mappedCredentials, null, 2))
+        console.log('[AddProviderDialog] Mapped credentials metadata:', {
+          credentialFieldNames: Object.keys(mappedCredentials),
+          credentialKeyCount: Object.keys(mappedCredentials).length,
+        })
         
         const hasAllRequiredFields = selectedProviderData.credentialFields
           .filter(f => f.required)

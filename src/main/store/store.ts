@@ -551,11 +551,16 @@ class StoreManager {
       return null
     }
     
-    console.log('[Store] Update account:', {
+    const previousEncryptedCredentials = accounts[index].credentials
+    const previousCredentialKeys = Object.keys(this.decryptCredentials(previousEncryptedCredentials))
+    const updatedCredentialKeys = updates.credentials ? Object.keys(updates.credentials) : []
+
+    console.log('[Store] Update account metadata:', {
       id,
-      updatesCredentials: updates.credentials,
-      oldCredentials: accounts[index].credentials,
-      oldCredentialsDecrypted: this.decryptCredentials(accounts[index].credentials),
+      providerId: accounts[index].providerId,
+      hasCredentials: Boolean(updates.credentials),
+      credentialKeyCount: updates.credentials ? updatedCredentialKeys.length : previousCredentialKeys.length,
+      credentialFieldNames: updates.credentials ? updatedCredentialKeys : previousCredentialKeys,
     })
     
     const updatedAccount: Account = {
@@ -566,9 +571,13 @@ class StoreManager {
     
     if (updates.credentials) {
       updatedAccount.credentials = this.encryptCredentials(updates.credentials)
-      console.log('[Store] Encrypted credentials:', updatedAccount.credentials)
-      console.log('[Store] Old credentials:', accounts[index].credentials)
-      console.log('[Store] Credentials match:', JSON.stringify(updatedAccount.credentials) === JSON.stringify(accounts[index].credentials))
+      console.log('[Store] Account credentials updated:', {
+        id,
+        providerId: accounts[index].providerId,
+        credentialsChanged: JSON.stringify(updatedAccount.credentials) !== JSON.stringify(previousEncryptedCredentials),
+        credentialKeyCount: updatedCredentialKeys.length,
+        credentialFieldNames: updatedCredentialKeys,
+      })
     }
     
     accounts[index] = updatedAccount
@@ -577,9 +586,11 @@ class StoreManager {
     // Verify save was successful
     const savedAccounts = this.store!.get('accounts') as Account[]
     const savedAccount = savedAccounts.find(a => a.id === id)
-    console.log('[Store] Verify after save:', {
+    console.log('[Store] Verify account save metadata:', {
       id,
-      savedCredentials: savedAccount?.credentials,
+      providerId: accounts[index].providerId,
+      hasCredentials: Boolean(savedAccount?.credentials),
+      credentialKeyCount: savedAccount?.credentials ? Object.keys(this.decryptCredentials(savedAccount.credentials)).length : 0,
     })
     
     return {
