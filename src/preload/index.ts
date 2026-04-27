@@ -104,6 +104,26 @@ const providersAPI = {
     error?: string
   }> => 
     ipcRenderer.invoke(IpcChannels.PROVIDERS_UPDATE_MODELS, providerId),
+
+  syncModels: (providerId: string): Promise<{
+    success: boolean
+    supported?: boolean
+    lastSyncedAt?: number
+    lastSyncStatus?: string
+    lastSyncError?: string
+    models?: EffectiveModel[]
+    error?: string
+  }> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_SYNC_MODELS, providerId),
+
+  getModelSyncStatus: (providerId: string): Promise<{
+    providerId: string
+    supported: boolean
+    lastSyncedAt?: number
+    lastSyncStatus: string
+    lastSyncError?: string
+  }> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_MODEL_SYNC_STATUS, providerId),
   
   getEffectiveModels: (providerId: string): Promise<EffectiveModel[]> => 
     ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_EFFECTIVE_MODELS, providerId),

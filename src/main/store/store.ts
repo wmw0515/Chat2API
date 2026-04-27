@@ -25,7 +25,10 @@ import {
   DailyStatistics,
   DEFAULT_STATISTICS,
   EffectiveModel,
+  ProviderModelCatalog,
+  ProviderModelCatalogEntry,
   ProviderModelOverrides,
+  DEFAULT_PROVIDER_MODEL_CATALOGS,
   DEFAULT_USER_MODEL_OVERRIDES,
   UserModelOverrides,
   CustomModel,
@@ -209,6 +212,7 @@ class StoreManager {
       sessions: [],
       statistics: DEFAULT_STATISTICS,
       userModelOverrides: DEFAULT_USER_MODEL_OVERRIDES,
+      providerModelCatalogs: DEFAULT_PROVIDER_MODEL_CATALOGS,
     }
   }
 
@@ -1557,6 +1561,68 @@ class StoreManager {
     }
   }
 
+  private getProviderModelCatalog(providerId: string): ProviderModelCatalog {
+    this.ensureInitialized()
+    const catalogs = this.store!.get('providerModelCatalogs') || DEFAULT_PROVIDER_MODEL_CATALOGS
+    return catalogs[providerId] || {
+      providerId,
+      models: [],
+      lastSyncStatus: 'idle',
+    }
+  }
+
+  private setProviderModelCatalog(catalog: ProviderModelCatalog): void {
+    this.ensureInitialized()
+    const catalogs = this.store!.get('providerModelCatalogs') || DEFAULT_PROVIDER_MODEL_CATALOGS
+    this.store!.set('providerModelCatalogs', {
+      ...catalogs,
+      [catalog.providerId]: catalog,
+    })
+  }
+
+  getModelSyncStatus(providerId: string) {
+    const catalog = this.getProviderModelCatalog(providerId)
+    return {
+      providerId: catalog.providerId,
+      lastSyncedAt: catalog.lastSyncedAt,
+      lastSyncStatus: catalog.lastSyncStatus,
+      lastSyncError: catalog.lastSyncError,
+    }
+  }
+
+  updateDiscoveredModels(providerId: string, models: ProviderModelCatalogEntry[]): void {
+    const previous = this.getProviderModelCatalog(providerId)
+    this.setProviderModelCatalog({
+      ...previous,
+      providerId,
+      models: models.filter(m => m.source === 'discovered'),
+      lastSyncedAt: Date.now(),
+      lastSyncStatus: 'success',
+      lastSyncError: undefined,
+    })
+  }
+
+  markModelSyncFailure(providerId: string, errorMessage: string): void {
+    const previous = this.getProviderModelCatalog(providerId)
+    this.setProviderModelCatalog({
+      ...previous,
+      providerId,
+      lastSyncedAt: Date.now(),
+      lastSyncStatus: 'failed',
+      lastSyncError: errorMessage,
+    })
+  }
+
+  markModelSyncUnsupported(providerId: string, reason: string): void {
+    const previous = this.getProviderModelCatalog(providerId)
+    this.setProviderModelCatalog({
+      ...previous,
+      providerId,
+      lastSyncStatus: 'unsupported',
+      lastSyncError: reason,
+    })
+  }
+
   /**
    * Get Effective Models for a Provider
    * Merges default models with user overrides
@@ -1572,29 +1638,53 @@ class StoreManager {
     const defaultModels = provider.supportedModels || []
     const modelMappings = provider.modelMappings || {}
     const overrides = this.getProviderModelOverrides(providerId)
+    const discoveredModels = this.getProviderModelCatalog(providerId).models
 
-    const effectiveModels: EffectiveModel[] = []
+    const merged = new Map<string, EffectiveModel>()
 
     defaultModels.forEach(displayName => {
       if (!overrides.excludedModels.includes(displayName)) {
         const actualModelId = modelMappings[displayName] || displayName
-        effectiveModels.push({
+        merged.set(displayName, {
           displayName,
           actualModelId,
           isCustom: false,
+          source: 'static',
         })
       }
     })
 
-    overrides.addedModels.forEach(customModel => {
-      effectiveModels.push({
-        displayName: customModel.displayName,
-        actualModelId: customModel.actualModelId,
-        isCustom: true,
+    discoveredModels.forEach(model => {
+      if (overrides.excludedModels.includes(model.displayName)) {
+        return
+      }
+      const previous = merged.get(model.displayName)
+      if (previous) {
+        merged.set(model.displayName, {
+          ...previous,
+          actualModelId: model.actualModelId,
+          source: 'discovered',
+        })
+        return
+      }
+      merged.set(model.displayName, {
+        displayName: model.displayName,
+        actualModelId: model.actualModelId,
+        isCustom: false,
+        source: 'discovered',
       })
     })
 
-    return effectiveModels
+    overrides.addedModels.forEach(customModel => {
+      merged.set(customModel.displayName, {
+        displayName: customModel.displayName,
+        actualModelId: customModel.actualModelId,
+        isCustom: true,
+        source: 'manual',
+      })
+    })
+
+    return [...merged.values()]
   }
 
   /**
@@ -1649,7 +1739,8 @@ class StoreManager {
     }
 
     const defaultModels = provider.supportedModels || []
-    const isDefaultModel = defaultModels.includes(modelName)
+    const discoveredModels = this.getProviderModelCatalog(providerId).models.map(m => m.displayName)
+    const isDefaultModel = defaultModels.includes(modelName) || discoveredModels.includes(modelName)
 
     if (isDefaultModel) {
       if (!overrides[providerId].excludedModels.includes(modelName)) {
@@ -1725,6 +1816,7 @@ class StoreManager {
     const sessions = this.store!.get('sessions') || []
     const statistics = this.store!.get('statistics') || DEFAULT_STATISTICS
     const userModelOverrides = this.store!.get('userModelOverrides') || DEFAULT_USER_MODEL_OVERRIDES
+    const providerModelCatalogs = this.store!.get('providerModelCatalogs') || DEFAULT_PROVIDER_MODEL_CATALOGS
     
     return {
       providers,
@@ -1736,6 +1828,7 @@ class StoreManager {
       sessions,
       statistics,
       userModelOverrides,
+      providerModelCatalogs,
     }
   }
 

@@ -16,6 +16,7 @@ import ProviderManager from '../store/providers'
 import AccountManager from '../store/accounts'
 import ConfigManager from '../store/config'
 import { ProviderChecker } from '../providers/checker'
+import { discoverProviderModels, providerSupportsModelDiscovery } from '../providers/modelDiscovery'
 import { validateCredentials } from '../store/validator'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -468,6 +469,76 @@ export class ProxyServer {
         return
       }
       ctx.body = storeManager.getEffectiveModels(ctx.params.id)
+    }))
+
+    this.router.post('/dashboard-api/providers/:id/models/sync', withDashboardErrorHandling(async (ctx) => {
+      const provider = ProviderManager.getById(ctx.params.id)
+      if (!provider) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
+        return
+      }
+
+      if (!providerSupportsModelDiscovery(provider.id)) {
+        storeManager.markModelSyncUnsupported(provider.id, 'This provider does not support dynamic model discovery')
+        ctx.body = {
+          success: false,
+          supported: false,
+          ...storeManager.getModelSyncStatus(provider.id),
+        }
+        return
+      }
+
+      const account = AccountManager.getByProviderId(provider.id, true).find(item => item.status === 'active')
+      if (!account) {
+        const message = 'No active account with credentials found for model sync'
+        storeManager.markModelSyncFailure(provider.id, message)
+        ctx.status = 400
+        ctx.body = {
+          success: false,
+          supported: true,
+          error: message,
+          ...storeManager.getModelSyncStatus(provider.id),
+          models: storeManager.getEffectiveModels(provider.id),
+        }
+        return
+      }
+
+      try {
+        const result = await discoverProviderModels(provider, account)
+        storeManager.updateDiscoveredModels(provider.id, result.models)
+        ctx.body = {
+          success: true,
+          supported: true,
+          ...storeManager.getModelSyncStatus(provider.id),
+          models: storeManager.getEffectiveModels(provider.id),
+        }
+      } catch (error) {
+        const safeMessage = error instanceof Error ? error.message : 'Failed to sync models'
+        storeManager.markModelSyncFailure(provider.id, safeMessage)
+        ctx.status = 502
+        ctx.body = {
+          success: false,
+          supported: true,
+          error: safeMessage,
+          ...storeManager.getModelSyncStatus(provider.id),
+          models: storeManager.getEffectiveModels(provider.id),
+        }
+      }
+    }))
+
+    this.router.get('/dashboard-api/providers/:id/models/sync-status', withDashboardErrorHandling(async (ctx) => {
+      const provider = ProviderManager.getById(ctx.params.id)
+      if (!provider) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
+        return
+      }
+      ctx.body = {
+        providerId: provider.id,
+        supported: providerSupportsModelDiscovery(provider.id),
+        ...storeManager.getModelSyncStatus(provider.id),
+      }
     }))
 
     this.router.post('/dashboard-api/providers/:id/models', withDashboardErrorHandling(async (ctx) => {

@@ -908,6 +908,12 @@
     "removeError": "Failed to remove model",
     "resetSuccess": "Models reset to default",
     "resetError": "Failed to reset models",
+    "syncModels": "同步模型列表",
+    "syncSuccess": "Model sync completed",
+    "syncStatus": "Sync status",
+    "syncError": "Sync error",
+    "syncUnsupported": "This provider does not support dynamic model discovery.",
+    "lastSyncedAt": "Last synced",
     "confirmReset": "Are you sure you want to reset to default? This will remove all custom models and exclusion settings.",
     "confirmDelete": "Are you sure you want to delete this model?"
   },
