@@ -73,6 +73,7 @@
     "descriptionPlaceholder": "Enter description (optional)",
     "supportedModels": "Supported Models",
     "supportedModelsHelp": "Click to add or remove models",
+    "customProviderModelRoutingWarning": "Custom providers must configure at least one model, otherwise they will not participate in /v1/chat/completions request routing.",
     "models": "Models",
     "modelNamePlaceholder": "Enter model name",
     "headersConfig": "Headers Config",
