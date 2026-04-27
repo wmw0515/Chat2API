@@ -23,6 +23,7 @@ import type { ProviderType } from '../oauth/types'
 let proxyServer: ProxyServer | null = null
 let proxyStartTime: number | null = null
 const updaterManager = UpdaterManager.getInstance()
+const isModelDiscoveryEnabled = (): boolean => process.env.CHAT2API_ENABLE_MODEL_DISCOVERY === '1'
 
 export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Promise<void> {
   try {
@@ -299,6 +300,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   ipcMain.handle(IpcChannels.PROVIDERS_SYNC_MODELS, async (_, providerId: string): Promise<{
     success: boolean
     supported?: boolean
+    discoveryEnabled?: boolean
     models?: any[]
     lastSyncedAt?: number
     lastSyncStatus?: string
@@ -310,11 +312,21 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
       return { success: false, error: 'Provider not found' }
     }
 
+    if (!isModelDiscoveryEnabled()) {
+      return {
+        success: false,
+        supported: providerSupportsModelDiscovery(providerId),
+        discoveryEnabled: false,
+        error: 'Dynamic model discovery is experimental and disabled by default.',
+      }
+    }
+
     if (!providerSupportsModelDiscovery(providerId)) {
       storeManager.markModelSyncUnsupported(providerId, 'This provider does not support dynamic model discovery')
       return {
         success: false,
         supported: false,
+        discoveryEnabled: true,
         ...storeManager.getModelSyncStatus(providerId),
       }
     }
@@ -326,6 +338,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
       return {
         success: false,
         supported: true,
+        discoveryEnabled: true,
         error: message,
         ...storeManager.getModelSyncStatus(providerId),
         models: storeManager.getEffectiveModels(providerId),
@@ -338,6 +351,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
       return {
         success: true,
         supported: true,
+        discoveryEnabled: true,
         ...storeManager.getModelSyncStatus(providerId),
         models: storeManager.getEffectiveModels(providerId),
       }
@@ -347,6 +361,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
       return {
         success: false,
         supported: true,
+        discoveryEnabled: true,
         error: message,
         ...storeManager.getModelSyncStatus(providerId),
         models: storeManager.getEffectiveModels(providerId),
@@ -366,6 +381,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     }
     return {
       providerId,
+      discoveryEnabled: isModelDiscoveryEnabled(),
       supported: providerSupportsModelDiscovery(providerId),
       ...storeManager.getModelSyncStatus(providerId),
     }

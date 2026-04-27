@@ -109,6 +109,7 @@ interface ProvidersAPI {
   syncModels: (providerId: string) => Promise<{
     success: boolean
     supported?: boolean
+    discoveryEnabled?: boolean
     lastSyncedAt?: number
     lastSyncStatus?: string
     lastSyncError?: string
@@ -118,6 +119,7 @@ interface ProvidersAPI {
   getModelSyncStatus: (providerId: string) => Promise<{
     providerId: string
     supported: boolean
+    discoveryEnabled?: boolean
     lastSyncedAt?: number
     lastSyncStatus: string
     lastSyncError?: string
