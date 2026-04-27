@@ -34,6 +34,13 @@ export const IpcChannels = {
   PROVIDERS_ADD_CUSTOM_MODEL: 'providers:addCustomModel',
   PROVIDERS_REMOVE_MODEL: 'providers:removeModel',
   PROVIDERS_RESET_MODELS: 'providers:resetModels',
+  PROVIDERS_GET_PRESETS: 'providers:getPresets',
+  PROVIDERS_CREATE_PRESET: 'providers:createPreset',
+  PROVIDERS_UPDATE_PRESET: 'providers:updatePreset',
+  PROVIDERS_DELETE_PRESET: 'providers:deletePreset',
+  PROVIDERS_GET_OVERRIDE: 'providers:getOverride',
+  PROVIDERS_UPDATE_OVERRIDE: 'providers:updateOverride',
+  PROVIDERS_DELETE_OVERRIDE: 'providers:deleteOverride',
 
   ACCOUNTS_GET_ALL: 'accounts:getAll',
   ACCOUNTS_GET_BY_ID: 'accounts:getById',

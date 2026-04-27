@@ -15,6 +15,8 @@ import type {
   SystemPrompt,
   PromptType,
   EffectiveModel,
+  ProviderPreset,
+  ProviderConfigOverride,
 } from '../shared/types'
 
 const proxyAPI = {
@@ -63,6 +65,20 @@ const providersAPI = {
   
   getBuiltin: (): Promise<any[]> => 
     ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_BUILTIN),
+  getPresets: (): Promise<ProviderPreset[]> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_PRESETS),
+  createPreset: (preset: ProviderPreset): Promise<ProviderPreset> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_CREATE_PRESET, preset),
+  updatePreset: (presetId: string, updates: Partial<ProviderPreset>): Promise<ProviderPreset | null> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_UPDATE_PRESET, presetId, updates),
+  deletePreset: (presetId: string): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_DELETE_PRESET, presetId),
+  getOverride: (providerId: string): Promise<ProviderConfigOverride | null> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_OVERRIDE, providerId),
+  updateOverride: (providerId: string, override: ProviderConfigOverride): Promise<ProviderConfigOverride> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_UPDATE_OVERRIDE, providerId, override),
+  deleteOverride: (providerId: string): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_DELETE_OVERRIDE, providerId),
   
   add: (data: {
     id?: string
@@ -70,6 +86,7 @@ const providersAPI = {
     name: string
     authType: AuthType
     apiEndpoint: string
+    chatPath?: string
     headers?: Record<string, string>
     description?: string
     supportedModels?: string[]

@@ -179,18 +179,16 @@ export function ProviderCard({
                   {t('providers.updateModels')}
                 </DropdownMenuItem>
               )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => onEdit(provider.id)}>
+                <Edit className="mr-2 h-4 w-4" />
+                {t('providers.editProvider')}
+              </DropdownMenuItem>
               {!isBuiltin && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => onEdit(provider.id)}>
-                    <Edit className="mr-2 h-4 w-4" />
-                    {t('providers.editProvider')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onDuplicate(provider.id)}>
-                    <Copy className="mr-2 h-4 w-4" />
-                    {t('providers.duplicateProvider')}
-                  </DropdownMenuItem>
-                </>
+                <DropdownMenuItem onClick={() => onDuplicate(provider.id)}>
+                  <Copy className="mr-2 h-4 w-4" />
+                  {t('providers.duplicateProvider')}
+                </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
               <DropdownMenuItem 

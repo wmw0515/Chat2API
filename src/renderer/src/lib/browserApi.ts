@@ -88,6 +88,13 @@ export function installBrowserApiShim() {
     providers: {
       getAll: () => request('/providers'),
       getBuiltin: () => request('/providers/builtin'),
+      getPresets: () => request('/provider-presets'),
+      createPreset: (preset: any) => request('/provider-presets', { method: 'POST', body: preset }),
+      updatePreset: (presetId: string, updates: any) => request(`/provider-presets/${presetId}`, { method: 'PUT', body: updates }),
+      deletePreset: (presetId: string) => request(`/provider-presets/${presetId}`, { method: 'DELETE' }).then(() => true),
+      getOverride: (providerId: string) => request(`/providers/${providerId}/override`),
+      updateOverride: (providerId: string, override: any) => request(`/providers/${providerId}/override`, { method: 'PUT', body: override }),
+      deleteOverride: (providerId: string) => request(`/providers/${providerId}/override`, { method: 'DELETE' }).then(() => true),
       add: (data: any) => request('/providers', { method: 'POST', body: data }),
       update: (id: string, updates: any) => request(`/providers/${id}`, { method: 'PUT', body: updates }),
       delete: (id: string) => request(`/providers/${id}`, { method: 'DELETE' }).then(() => true),

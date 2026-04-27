@@ -23,6 +23,7 @@ import type {
   BuiltinProviderConfig,
   CustomProviderFormData,
   Account,
+  ProviderPreset,
 } from '@/types/electron'
 import { FilterType, StatusFilter } from '@/components/providers/ProviderFilter'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -45,6 +46,7 @@ export function Providers() {
   const [showAddProviderDialog, setShowAddProviderDialog] = useState(false)
   const [showCustomProviderForm, setShowCustomProviderForm] = useState(false)
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null)
+  const [providerPresets, setProviderPresets] = useState<ProviderPreset[]>([])
   
   const [showAddAccountDialog, setShowAddAccountDialog] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
@@ -80,15 +82,17 @@ export function Providers() {
   }, [])
 
   const refreshProviderAndAccountData = async () => {
-    const [providersData, builtinData, accountsData] = await Promise.all([
+    const [providersData, builtinData, accountsData, presetsData] = await Promise.all([
       window.electronAPI.providers.getAll(),
       window.electronAPI.providers.getBuiltin(),
       window.electronAPI.accounts.getAll(),
+      window.electronAPI.providers.getPresets ? window.electronAPI.providers.getPresets() : Promise.resolve([]),
     ])
 
     useProvidersStore.getState().setProviders(providersData)
     useProvidersStore.getState().setBuiltinProviders(builtinData)
     useProvidersStore.getState().setAccounts(accountsData)
+    setProviderPresets((presetsData as ProviderPreset[]).filter((preset) => preset.type === 'custom'))
 
     const existingStatuses = useProvidersStore.getState().providerStatuses
     const statusMap: Record<string, ProviderStatus> = { ...existingStatuses }
@@ -337,15 +341,26 @@ export function Providers() {
   const handleCustomProviderFormSubmit = async (data: CustomProviderFormData) => {
     try {
       if (editingProvider) {
-        const updated = await window.electronAPI.providers.update(editingProvider.id, {
-          name: data.name,
-          authType: data.authType,
-          apiEndpoint: data.apiEndpoint,
-          headers: data.headers,
-          description: data.description,
-          supportedModels: data.supportedModels,
-          credentialFields: data.credentialFields,
-        })
+        const updatePayload = editingProvider.type === 'builtin'
+          ? {
+              apiEndpoint: data.apiEndpoint,
+              chatPath: data.chatPath,
+              headers: data.headers,
+              description: data.description,
+              supportedModels: data.supportedModels,
+              credentialFields: data.credentialFields,
+            }
+          : {
+              name: data.name,
+              authType: data.authType,
+              apiEndpoint: data.apiEndpoint,
+              chatPath: data.chatPath,
+              headers: data.headers,
+              description: data.description,
+              supportedModels: data.supportedModels,
+              credentialFields: data.credentialFields,
+            }
+        const updated = await window.electronAPI.providers.update(editingProvider.id, updatePayload as any)
       if (updated) {
           await refreshProviderAndAccountData()
           toast({
@@ -362,6 +377,7 @@ export function Providers() {
           description: data.description,
           supportedModels: data.supportedModels,
           credentialFields: data.credentialFields,
+          chatPath: data.chatPath,
         })
         await refreshProviderAndAccountData()
         toast({
@@ -735,10 +751,33 @@ export function Providers() {
           name: editingProvider.name,
           authType: editingProvider.authType,
           apiEndpoint: editingProvider.apiEndpoint,
+          chatPath: editingProvider.chatPath,
           headers: editingProvider.headers,
           description: editingProvider.description || '',
           supportedModels: editingProvider.supportedModels || [],
+          credentialFields: editingProvider.credentialFields || [],
         } : undefined}
+        builtinProviders={store.builtinProviders}
+        customPresets={providerPresets}
+        onResetBuiltinOverride={async (providerId) => {
+          await window.electronAPI.providers.deleteOverride(providerId)
+          await refreshProviderAndAccountData()
+        }}
+        onSaveAsPreset={async (data) => {
+          await window.electronAPI.providers.createPreset({
+            presetId: `preset_${Date.now()}`,
+            name: data.name,
+            type: 'custom',
+            authType: data.authType,
+            apiEndpoint: data.apiEndpoint,
+            chatPath: data.chatPath,
+            headers: data.headers,
+            description: data.description,
+            supportedModels: data.supportedModels,
+            credentialFields: data.credentialFields,
+          } as any)
+          await refreshProviderAndAccountData()
+        }}
       />
 
       {modelEditorProvider && (

@@ -169,10 +169,35 @@ export interface Provider {
   supportedModels?: string[]
   /** Model name mapping */
   modelMappings?: Record<string, string>
+  /** Credential fields definition */
+  credentialFields?: CredentialField[]
   /** Provider status */
   status?: ProviderStatus
   /** Last status check time */
   lastStatusCheck?: number
+}
+
+export interface ProviderPreset {
+  presetId: string
+  name: string
+  type: 'builtin' | 'custom'
+  providerId?: string
+  authType: AuthType
+  apiEndpoint: string
+  chatPath?: string
+  headers: Record<string, string>
+  description?: string
+  supportedModels?: string[]
+  credentialFields?: CredentialField[]
+}
+
+export interface ProviderConfigOverride {
+  apiEndpoint?: string
+  chatPath?: string
+  headers?: Record<string, string>
+  description?: string
+  supportedModels?: string[]
+  credentialFields?: CredentialField[]
 }
 
 /**
@@ -704,6 +729,10 @@ export interface StoreSchema {
   providerModelCatalogs: ProviderModelCatalogs
   /** Passive runtime health per provider/model */
   providerModelRuntimeHealths: ProviderModelRuntimeHealths
+  /** Built-in provider config overrides */
+  providerConfigOverrides: Record<string, ProviderConfigOverride>
+  /** User custom provider presets */
+  providerPresets: ProviderPreset[]
 }
 
 /**
@@ -737,6 +766,8 @@ export const DEFAULT_STATISTICS: PersistentStatistics = {
 export const DEFAULT_USER_MODEL_OVERRIDES: UserModelOverrides = {}
 export const DEFAULT_PROVIDER_MODEL_CATALOGS: ProviderModelCatalogs = {}
 export const DEFAULT_PROVIDER_MODEL_RUNTIME_HEALTHS: ProviderModelRuntimeHealths = {}
+export const DEFAULT_PROVIDER_CONFIG_OVERRIDES: Record<string, ProviderConfigOverride> = {}
+export const DEFAULT_PROVIDER_PRESETS: ProviderPreset[] = []
 
 /**
  * Default Tool Prompt Configuration

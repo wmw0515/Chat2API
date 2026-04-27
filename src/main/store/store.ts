@@ -32,10 +32,15 @@ import {
   RuntimeErrorCode,
   DEFAULT_PROVIDER_MODEL_CATALOGS,
   DEFAULT_PROVIDER_MODEL_RUNTIME_HEALTHS,
+  DEFAULT_PROVIDER_CONFIG_OVERRIDES,
+  DEFAULT_PROVIDER_PRESETS,
   DEFAULT_USER_MODEL_OVERRIDES,
   UserModelOverrides,
   CustomModel,
+  ProviderConfigOverride,
+  ProviderPreset,
 } from './types'
+import { getBuiltinProvider } from '../providers/builtin'
 import { BUILTIN_PROMPTS } from '../data/builtin-prompts'
 import { IpcChannels } from '../ipc/channels'
 
@@ -217,6 +222,8 @@ class StoreManager {
       userModelOverrides: DEFAULT_USER_MODEL_OVERRIDES,
       providerModelCatalogs: DEFAULT_PROVIDER_MODEL_CATALOGS,
       providerModelRuntimeHealths: DEFAULT_PROVIDER_MODEL_RUNTIME_HEALTHS,
+      providerConfigOverrides: DEFAULT_PROVIDER_CONFIG_OVERRIDES,
+      providerPresets: DEFAULT_PROVIDER_PRESETS,
     }
   }
 
@@ -381,7 +388,8 @@ class StoreManager {
    */
   getProviders(): Provider[] {
     this.ensureInitialized()
-    return this.store!.get('providers') || []
+    const providers = this.store!.get('providers') || []
+    return providers.map((provider: Provider) => this.getEffectiveProvider(provider))
   }
 
   /**
@@ -390,7 +398,25 @@ class StoreManager {
   getProviderById(id: string): Provider | undefined {
     this.ensureInitialized()
     const providers = this.store!.get('providers') as Provider[] || []
-    return providers.find((p: Provider) => p.id === id)
+    const provider = providers.find((p: Provider) => p.id === id)
+    return provider ? this.getEffectiveProvider(provider) : undefined
+  }
+
+  private getEffectiveProvider(provider: Provider): Provider {
+    if (provider.type !== 'builtin') {
+      return provider
+    }
+    const overrides = this.getProviderConfigOverride(provider.id)
+    if (!overrides) {
+      return provider
+    }
+    return {
+      ...provider,
+      ...overrides,
+      headers: overrides.headers || provider.headers,
+      supportedModels: overrides.supportedModels || provider.supportedModels,
+      credentialFields: overrides.credentialFields || provider.credentialFields,
+    }
   }
 
   /**
@@ -443,7 +469,80 @@ class StoreManager {
     const accounts = this.store!.get('accounts') as Account[] || []
     const filteredAccounts = accounts.filter((a: Account) => a.providerId !== id)
     this.store!.set('accounts', filteredAccounts)
+    this.deleteProviderConfigOverride(id)
     
+    return true
+  }
+
+  getProviderConfigOverrides(): Record<string, ProviderConfigOverride> {
+    this.ensureInitialized()
+    return this.store!.get('providerConfigOverrides') || {}
+  }
+
+  getProviderConfigOverride(providerId: string): ProviderConfigOverride | undefined {
+    const overrides = this.getProviderConfigOverrides()
+    return overrides[providerId]
+  }
+
+  upsertProviderConfigOverride(providerId: string, override: ProviderConfigOverride): ProviderConfigOverride {
+    this.ensureInitialized()
+    const builtin = getBuiltinProvider(providerId)
+    if (!builtin) {
+      throw new Error('Only built-in providers support overrides')
+    }
+    const allowedCredentialNames = new Set((builtin.credentialFields || []).map(field => field.name))
+    if (override.credentialFields) {
+      for (const field of override.credentialFields) {
+        if (!allowedCredentialNames.has(field.name)) {
+          throw new Error(`Credential field "${field.name}" is not supported for built-in provider`)
+        }
+      }
+    }
+
+    const overrides = this.getProviderConfigOverrides()
+    overrides[providerId] = { ...overrides[providerId], ...override }
+    this.store!.set('providerConfigOverrides', overrides)
+    return overrides[providerId]
+  }
+
+  deleteProviderConfigOverride(providerId: string): void {
+    this.ensureInitialized()
+    const overrides = this.getProviderConfigOverrides()
+    if (overrides[providerId]) {
+      delete overrides[providerId]
+      this.store!.set('providerConfigOverrides', overrides)
+    }
+  }
+
+  getProviderPresets(): ProviderPreset[] {
+    this.ensureInitialized()
+    return this.store!.get('providerPresets') || []
+  }
+
+  addProviderPreset(preset: ProviderPreset): ProviderPreset {
+    this.ensureInitialized()
+    const presets = this.getProviderPresets()
+    presets.push(preset)
+    this.store!.set('providerPresets', presets)
+    return preset
+  }
+
+  updateProviderPreset(presetId: string, updates: Partial<ProviderPreset>): ProviderPreset | null {
+    this.ensureInitialized()
+    const presets = this.getProviderPresets()
+    const index = presets.findIndex((item) => item.presetId === presetId)
+    if (index === -1) return null
+    presets[index] = { ...presets[index], ...updates, presetId }
+    this.store!.set('providerPresets', presets)
+    return presets[index]
+  }
+
+  deleteProviderPreset(presetId: string): boolean {
+    this.ensureInitialized()
+    const presets = this.getProviderPresets()
+    const next = presets.filter((item) => item.presetId !== presetId)
+    if (next.length === presets.length) return false
+    this.store!.set('providerPresets', next)
     return true
   }
 
