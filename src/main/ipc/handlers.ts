@@ -5,6 +5,7 @@ import { storeManager } from '../store/store'
 import { ProviderManager } from '../store/providers'
 import { AccountManager } from '../store/accounts'
 import { ProviderChecker } from '../providers/checker'
+import { discoverProviderModels, providerSupportsModelDiscovery } from '../providers/modelDiscovery'
 import { CustomProviderManager } from '../providers/custom'
 import { getBuiltinProviders, getBuiltinProvider } from '../providers/builtin'
 import { oauthManager } from '../oauth/manager'
@@ -297,31 +298,76 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
 
   ipcMain.handle(IpcChannels.PROVIDERS_SYNC_MODELS, async (_, providerId: string): Promise<{
     success: boolean
-    supportedModels?: string[]
-    modelMappings?: Record<string, string>
+    supported?: boolean
+    models?: any[]
+    lastSyncedAt?: number
+    lastSyncStatus?: string
+    lastSyncError?: string
     error?: string
   }> => {
-    try {
-      const result = await ProviderChecker.fetchProviderModels(providerId)
-      
-      const provider = ProviderManager.getById(providerId)
-      if (provider) {
-        ProviderManager.update(providerId, {
-          supportedModels: result.supportedModels,
-          modelMappings: result.modelMappings,
-        })
-      }
+    const provider = ProviderManager.getById(providerId)
+    if (!provider) {
+      return { success: false, error: 'Provider not found' }
+    }
 
-      return {
-        success: true,
-        supportedModels: result.supportedModels,
-        modelMappings: result.modelMappings,
-      }
-    } catch (error) {
+    if (!providerSupportsModelDiscovery(providerId)) {
+      storeManager.markModelSyncUnsupported(providerId, 'This provider does not support dynamic model discovery')
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to sync models',
+        supported: false,
+        ...storeManager.getModelSyncStatus(providerId),
       }
+    }
+
+    const account = AccountManager.getByProviderId(providerId, true).find(item => item.status === 'active')
+    if (!account) {
+      const message = 'No active account with credentials found for model sync'
+      storeManager.markModelSyncFailure(providerId, message)
+      return {
+        success: false,
+        supported: true,
+        error: message,
+        ...storeManager.getModelSyncStatus(providerId),
+        models: storeManager.getEffectiveModels(providerId),
+      }
+    }
+
+    try {
+      const result = await discoverProviderModels(provider, account)
+      storeManager.updateDiscoveredModels(providerId, result.models)
+      return {
+        success: true,
+        supported: true,
+        ...storeManager.getModelSyncStatus(providerId),
+        models: storeManager.getEffectiveModels(providerId),
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to sync models'
+      storeManager.markModelSyncFailure(providerId, message)
+      return {
+        success: false,
+        supported: true,
+        error: message,
+        ...storeManager.getModelSyncStatus(providerId),
+        models: storeManager.getEffectiveModels(providerId),
+      }
+    }
+  })
+
+  ipcMain.handle(IpcChannels.PROVIDERS_GET_MODEL_SYNC_STATUS, async (_, providerId: string) => {
+    const provider = ProviderManager.getById(providerId)
+    if (!provider) {
+      return {
+        providerId,
+        supported: false,
+        lastSyncStatus: 'failed',
+        lastSyncError: 'Provider not found',
+      }
+    }
+    return {
+      providerId,
+      supported: providerSupportsModelDiscovery(providerId),
+      ...storeManager.getModelSyncStatus(providerId),
     }
   })
 

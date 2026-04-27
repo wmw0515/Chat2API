@@ -106,6 +106,22 @@ interface ProvidersAPI {
     modelsCount?: number
     error?: string
   }>
+  syncModels: (providerId: string) => Promise<{
+    success: boolean
+    supported?: boolean
+    lastSyncedAt?: number
+    lastSyncStatus?: string
+    lastSyncError?: string
+    models?: EffectiveModel[]
+    error?: string
+  }>
+  getModelSyncStatus: (providerId: string) => Promise<{
+    providerId: string
+    supported: boolean
+    lastSyncedAt?: number
+    lastSyncStatus: string
+    lastSyncError?: string
+  }>
   getEffectiveModels: (providerId: string) => Promise<EffectiveModel[]>
   addCustomModel: (providerId: string, model: { displayName: string; actualModelId: string }) => Promise<{
     success: boolean

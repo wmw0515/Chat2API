@@ -28,6 +28,7 @@ export const IpcChannels = {
   PROVIDERS_EXPORT: 'providers:export',
   PROVIDERS_IMPORT: 'providers:import',
   PROVIDERS_SYNC_MODELS: 'providers:syncModels',
+  PROVIDERS_GET_MODEL_SYNC_STATUS: 'providers:getModelSyncStatus',
   PROVIDERS_UPDATE_MODELS: 'providers:updateModels',
   PROVIDERS_GET_EFFECTIVE_MODELS: 'providers:getEffectiveModels',
   PROVIDERS_ADD_CUSTOM_MODEL: 'providers:addCustomModel',

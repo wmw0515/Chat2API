@@ -908,6 +908,12 @@
     "removeError": "模型删除失败",
     "resetSuccess": "已恢复默认模型",
     "resetError": "恢复默认失败",
+    "syncModels": "同步模型列表",
+    "syncSuccess": "模型同步完成",
+    "syncStatus": "同步状态",
+    "syncError": "同步错误",
+    "syncUnsupported": "当前供应商不支持动态模型发现。",
+    "lastSyncedAt": "上次同步时间",
     "confirmReset": "确定要恢复默认模型吗？这将删除所有自定义模型和排除设置。",
     "confirmDelete": "确定要删除此模型吗？"
   },

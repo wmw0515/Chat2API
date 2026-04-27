@@ -366,4 +366,19 @@ export interface EffectiveModel {
   displayName: string
   actualModelId: string
   isCustom: boolean
+  source?: 'static' | 'discovered' | 'manual'
+}
+
+export interface ProviderModelCatalogEntry {
+  displayName: string
+  actualModelId: string
+  source: 'static' | 'discovered' | 'manual'
+}
+
+export interface ProviderModelSyncStatus {
+  providerId: string
+  supported: boolean
+  lastSyncedAt?: number
+  lastSyncStatus: 'idle' | 'success' | 'failed' | 'unsupported'
+  lastSyncError?: string
 }

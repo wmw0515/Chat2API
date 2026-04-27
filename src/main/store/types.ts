@@ -629,7 +629,25 @@ export interface EffectiveModel {
   actualModelId: string
   /** Whether this is a user-added custom model */
   isCustom: boolean
+  /** Model source */
+  source?: 'static' | 'discovered' | 'manual'
 }
+
+export interface ProviderModelCatalogEntry {
+  displayName: string
+  actualModelId: string
+  source: 'static' | 'discovered' | 'manual'
+}
+
+export interface ProviderModelCatalog {
+  providerId: string
+  models: ProviderModelCatalogEntry[]
+  lastSyncedAt?: number
+  lastSyncStatus: 'idle' | 'success' | 'failed' | 'unsupported'
+  lastSyncError?: string
+}
+
+export type ProviderModelCatalogs = Record<string, ProviderModelCatalog>
 
 /**
  * Storage Data Structure Interface
@@ -653,6 +671,8 @@ export interface StoreSchema {
   statistics: PersistentStatistics
   /** User model overrides for built-in providers */
   userModelOverrides: UserModelOverrides
+  /** Provider dynamic model catalogs */
+  providerModelCatalogs: ProviderModelCatalogs
 }
 
 /**
@@ -684,6 +704,7 @@ export const DEFAULT_STATISTICS: PersistentStatistics = {
  * Default User Model Overrides
  */
 export const DEFAULT_USER_MODEL_OVERRIDES: UserModelOverrides = {}
+export const DEFAULT_PROVIDER_MODEL_CATALOGS: ProviderModelCatalogs = {}
 
 /**
  * Default Tool Prompt Configuration

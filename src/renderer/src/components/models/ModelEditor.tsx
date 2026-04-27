@@ -54,11 +54,19 @@ export function ModelEditor({
   const [newActualModelId, setNewActualModelId] = useState('')
   const [isAdding, setIsAdding] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
   const [deletingModel, setDeletingModel] = useState<string | null>(null)
+  const [syncStatus, setSyncStatus] = useState<{
+    supported: boolean
+    lastSyncedAt?: number
+    lastSyncStatus?: string
+    lastSyncError?: string
+  } | null>(null)
 
   useEffect(() => {
     if (open) {
       loadModels()
+      loadSyncStatus()
     }
   }, [open, providerId])
 
@@ -81,6 +89,38 @@ export function ModelEditor({
 
   const defaultModels = models.filter(m => !m.isCustom)
   const customModels = models.filter(m => m.isCustom)
+
+  const loadSyncStatus = async () => {
+    try {
+      const status = await window.electronAPI.providers.getModelSyncStatus(providerId)
+      setSyncStatus(status)
+    } catch {
+      setSyncStatus(null)
+    }
+  }
+
+  const handleSyncModels = async () => {
+    setIsSyncing(true)
+    try {
+      const result = await window.electronAPI.providers.syncModels(providerId)
+      await loadSyncStatus()
+      if (result.success) {
+        await loadModels()
+        setModelsLastUpdated(Date.now())
+        toast({ title: t('common.success'), description: t('modelEditor.syncSuccess') })
+      } else {
+        throw new Error(result.error || t('modelEditor.syncError'))
+      }
+    } catch (error) {
+      toast({
+        title: t('common.error'),
+        description: error instanceof Error ? error.message : t('modelEditor.syncError'),
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSyncing(false)
+    }
+  }
 
   const handleAddModel = async () => {
     if (!newDisplayName.trim()) {
@@ -297,6 +337,13 @@ export function ModelEditor({
                   {t('modelEditor.warningMessage')}
                 </AlertDescription>
               </Alert>
+
+              <div className="text-xs text-muted-foreground space-y-1">
+                <div>{t('modelEditor.lastSyncedAt')}: {syncStatus?.lastSyncedAt ? new Date(syncStatus.lastSyncedAt).toLocaleString() : '-'}</div>
+                <div>{t('modelEditor.syncStatus')}: {syncStatus?.lastSyncStatus || 'idle'}</div>
+                {syncStatus?.lastSyncError ? <div>{t('modelEditor.syncError')}: {syncStatus.lastSyncError}</div> : null}
+                {syncStatus && !syncStatus.supported ? <div>{t('modelEditor.syncUnsupported')}</div> : null}
+              </div>
             </div>
           )}
 
@@ -322,6 +369,14 @@ export function ModelEditor({
                     <RotateCcw className="h-4 w-4 mr-2" />
                   )}
                   {t('modelEditor.resetDefault')}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleSyncModels}
+                  disabled={isLoading || isSyncing || (syncStatus ? !syncStatus.supported : false)}
+                >
+                  {isSyncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                  {t('modelEditor.syncModels')}
                 </Button>
               </div>
               <Button

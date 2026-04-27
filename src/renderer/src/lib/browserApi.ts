@@ -94,6 +94,8 @@ export function installBrowserApiShim() {
       checkStatus: (providerId: string) => request(`/providers/${providerId}/check-status`, { method: 'POST' }),
       checkAllStatus: () => request('/providers/check-all-status', { method: 'POST' }),
       getEffectiveModels: (providerId: string) => request(`/providers/${providerId}/effective-models`),
+      syncModels: (providerId: string) => request(`/providers/${providerId}/models/sync`, { method: 'POST' }),
+      getModelSyncStatus: (providerId: string) => request(`/providers/${providerId}/models/sync-status`),
       addCustomModel: (providerId: string, model: { displayName: string; actualModelId: string }) =>
         request(`/providers/${providerId}/models`, { method: 'POST', body: model }),
       removeModel: (providerId: string, modelName: string) =>
