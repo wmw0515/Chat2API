@@ -161,6 +161,7 @@ export function AddProviderDialog({
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set())
   const [activeTab, setActiveTab] = useState<string>('manual')
+  const [providerTab, setProviderTab] = useState<'builtin' | 'custom'>('builtin')
   const [credentials, setCredentials] = useState<Record<string, string>>({})
   const [isValidating, setIsValidating] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -442,6 +443,7 @@ export function AddProviderDialog({
       setCredentials({})
       setValidationResult({})
       setActiveTab('manual')
+      setProviderTab('builtin')
       setIsOAuthLoading(false)
       setOAuthStatus('')
       setVisibleFields({})
@@ -824,14 +826,20 @@ export function AddProviderDialog({
     )
   }
 
+  const handleProviderTabChange = (value: string) => {
+    if (value === 'custom') {
+      setProviderTab('custom')
+      handleCreateCustom()
+      return
+    }
+    setProviderTab('builtin')
+  }
+
   const renderStep1 = () => (
-    <Tabs defaultValue="builtin" className="mt-4">
+    <Tabs value={providerTab} onValueChange={handleProviderTabChange} className="mt-4">
       <TabsList className="grid w-full grid-cols-2">
         <TabsTrigger value="builtin">{t('providers.builtinProviders')}</TabsTrigger>
-        <TabsTrigger value="custom" disabled className="gap-1">
-          {t('providers.customProviders')}
-          <span className="text-[10px] text-muted-foreground">({t('providers.customProviderNotSupported')})</span>
-        </TabsTrigger>
+        <TabsTrigger value="custom">{t('providers.customProviders')}</TabsTrigger>
       </TabsList>
 
       <TabsContent value="builtin" className="mt-4">

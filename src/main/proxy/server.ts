@@ -185,6 +185,53 @@ export class ProxyServer {
    * Setup routes
    */
   private setupRoutes(): void {
+    const rootInfoResponse = {
+      name: 'Chat2API Proxy',
+      version: '1.1.2',
+      description: 'OpenAI API compatible proxy service',
+      endpoints: [
+        'POST /v1/chat/completions',
+        'GET /v1/models',
+        'GET /v1/models/:model',
+        'POST /v1/completions',
+      ],
+    }
+
+    const getSanitizedProviderUpdatePayload = (body: unknown): Record<string, unknown> => {
+      const payload = (body || {}) as Record<string, unknown>
+      const allowedFields = [
+        'name',
+        'authType',
+        'apiEndpoint',
+        'chatPath',
+        'headers',
+        'enabled',
+        'description',
+        'icon',
+        'supportedModels',
+        'modelMappings',
+        'credentialFields',
+      ]
+      return Object.fromEntries(
+        Object.entries(payload).filter(([key]) => allowedFields.includes(key)),
+      )
+    }
+
+    const getSanitizedAccountUpdatePayload = (body: unknown): Record<string, unknown> => {
+      const payload = (body || {}) as Record<string, unknown>
+      const allowedFields = [
+        'name',
+        'email',
+        'credentials',
+        'dailyLimit',
+        'weight',
+        'status',
+        'errorMessage',
+      ]
+      return Object.fromEntries(
+        Object.entries(payload).filter(([key]) => allowedFields.includes(key)),
+      )
+    }
     const parseDashboardError = (error: unknown): { message: string; code: string } => {
       if (error instanceof Error) {
         return { message: error.message, code: 'dashboard_request_failed' }
@@ -217,17 +264,21 @@ export class ProxyServer {
     }
 
     this.router.get('/', async (ctx) => {
-      ctx.body = {
-        name: 'Chat2API Proxy',
-        version: '1.1.2',
-        description: 'OpenAI API compatible proxy service',
-        endpoints: [
-          'POST /v1/chat/completions',
-          'GET /v1/models',
-          'GET /v1/models/:model',
-          'POST /v1/completions',
-        ],
+      const acceptHeader = (ctx.get('accept') || '').toLowerCase()
+      const explicitlyRequestsJson = acceptHeader.includes('application/json')
+      const acceptsHtml = Boolean(ctx.accepts('html'))
+
+      if (!explicitlyRequestsJson && acceptsHtml) {
+        const rendererRoot = this.resolveRendererRoot()
+        const indexFilePath = rendererRoot ? path.join(rendererRoot, 'index.html') : ''
+        if (indexFilePath && fs.existsSync(indexFilePath)) {
+          ctx.type = mime.lookup(indexFilePath) || 'text/html'
+          ctx.body = fs.createReadStream(indexFilePath)
+          return
+        }
       }
+
+      ctx.body = rootInfoResponse
     })
 
     this.router.get('/health', async (ctx) => {
@@ -304,7 +355,8 @@ export class ProxyServer {
     }))
 
     this.router.put('/dashboard-api/providers/:id', withDashboardErrorHandling(async (ctx) => {
-      const updated = ProviderManager.update(ctx.params.id, (ctx.request.body || {}) as any)
+      const updates = getSanitizedProviderUpdatePayload(ctx.request.body)
+      const updated = ProviderManager.update(ctx.params.id, updates as any)
       if (!updated) {
         ctx.status = 404
         ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
@@ -372,7 +424,8 @@ export class ProxyServer {
     }))
 
     this.router.put('/dashboard-api/accounts/:id', withDashboardErrorHandling(async (ctx) => {
-      const updated = AccountManager.update(ctx.params.id, (ctx.request.body || {}) as any)
+      const updates = getSanitizedAccountUpdatePayload(ctx.request.body)
+      const updated = AccountManager.update(ctx.params.id, updates as any)
       if (!updated) {
         ctx.status = 404
         ctx.body = { success: false, error: { code: 'account_not_found', message: `Account not found: ${ctx.params.id}` } }
