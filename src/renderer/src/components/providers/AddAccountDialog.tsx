@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useToast } from '@/hooks/use-toast'
 import { 
   ExternalLink, 
   User, 
@@ -147,6 +148,7 @@ export function AddAccountDialog({
   onUpdateAccount,
 }: AddAccountDialogProps) {
   const { t } = useTranslation()
+  const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<string>('manual')
   const [name, setName] = useState('')
   const [dailyLimit, setDailyLimit] = useState<string>('')
@@ -222,6 +224,18 @@ export function AddAccountDialog({
     try {
       const result = await onValidateToken(provider.id, credentials)
       setValidationResult(result)
+      if (result.valid) {
+        toast({
+          title: t('providers.credentialsValid'),
+          description: t('providers.validationSuccess'),
+        })
+      } else {
+        toast({
+          title: t('providers.credentialsValidationFailed'),
+          description: result.error || t('providers.validateFailed'),
+          variant: 'destructive',
+        })
+      }
 
       if (result.valid && result.userInfo) {
         if (!name && result.userInfo.name) {
@@ -229,9 +243,15 @@ export function AddAccountDialog({
         }
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : t('providers.validateFailed')
       setValidationResult({
         valid: false,
-        error: error instanceof Error ? error.message : t('providers.validateFailed'),
+        error: errorMessage,
+      })
+      toast({
+        title: t('providers.credentialsValidationFailed'),
+        description: errorMessage,
+        variant: 'destructive',
       })
     } finally {
       setIsValidating(false)

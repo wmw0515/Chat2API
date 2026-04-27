@@ -478,8 +478,8 @@ export function Providers() {
         }
         
         toast({
-          title: 'Credentials valid',
-          description: `Account health: ${validationResult.healthStatus || 'active'}`,
+          title: t('providers.credentialsValid'),
+          description: t('providers.accountHealthStatus', { status: validationResult.healthStatus || 'active' }),
         })
       } else {
         store.updateAccount(id, {
@@ -504,8 +504,11 @@ export function Providers() {
         const failedMessage = validationResult.error || validationResult.lastValidationError || t('providers.credentialsInvalid')
 
         toast({
-          title: 'Credentials validation failed',
-          description: `Health: ${failedHealthStatus}${failedMessage ? ` • ${failedMessage}` : ''}`,
+          title: t('providers.credentialsValidationFailed'),
+          description: t('providers.accountHealthStatusWithError', {
+            status: failedHealthStatus,
+            error: failedMessage ? ` • ${failedMessage}` : '',
+          }),
           variant: 'destructive',
         })
       }
@@ -529,7 +532,7 @@ export function Providers() {
       }
       
       toast({
-        title: 'Credentials validation failed',
+        title: t('providers.credentialsValidationFailed'),
         description: errorMessage,
         variant: 'destructive',
       })

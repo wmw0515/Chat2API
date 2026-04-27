@@ -460,6 +460,70 @@ export class ProxyServer {
       ctx.body = Object.fromEntries(entries)
     }))
 
+    this.router.get('/dashboard-api/providers/:id/effective-models', withDashboardErrorHandling(async (ctx) => {
+      const provider = ProviderManager.getById(ctx.params.id)
+      if (!provider) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
+        return
+      }
+      ctx.body = storeManager.getEffectiveModels(ctx.params.id)
+    }))
+
+    this.router.post('/dashboard-api/providers/:id/models', withDashboardErrorHandling(async (ctx) => {
+      const provider = ProviderManager.getById(ctx.params.id)
+      if (!provider) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
+        return
+      }
+      const body = (ctx.request.body || {}) as { displayName?: string; actualModelId?: string }
+      if (!body.displayName || !body.actualModelId) {
+        ctx.status = 400
+        ctx.body = { success: false, error: { code: 'invalid_model_payload', message: 'displayName and actualModelId are required' } }
+        return
+      }
+      ctx.body = {
+        success: true,
+        models: storeManager.addCustomModel(ctx.params.id, {
+          displayName: body.displayName,
+          actualModelId: body.actualModelId,
+        }),
+      }
+    }))
+
+    this.router.delete('/dashboard-api/providers/:id/models/:modelName', withDashboardErrorHandling(async (ctx) => {
+      const provider = ProviderManager.getById(ctx.params.id)
+      if (!provider) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
+        return
+      }
+      const modelName = decodeURIComponent(ctx.params.modelName || '')
+      if (!modelName) {
+        ctx.status = 400
+        ctx.body = { success: false, error: { code: 'invalid_model_name', message: 'modelName is required' } }
+        return
+      }
+      ctx.body = {
+        success: true,
+        models: storeManager.removeModel(ctx.params.id, modelName),
+      }
+    }))
+
+    this.router.post('/dashboard-api/providers/:id/models/reset', withDashboardErrorHandling(async (ctx) => {
+      const provider = ProviderManager.getById(ctx.params.id)
+      if (!provider) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
+        return
+      }
+      ctx.body = {
+        success: true,
+        models: storeManager.resetModels(ctx.params.id),
+      }
+    }))
+
     this.router.get('/dashboard-api/accounts', withDashboardErrorHandling(async (ctx) => {
       const providerId = typeof ctx.query.providerId === 'string' ? ctx.query.providerId : undefined
       if (providerId) {
