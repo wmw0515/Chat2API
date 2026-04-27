@@ -344,6 +344,7 @@ export function Providers() {
           headers: data.headers,
           description: data.description,
           supportedModels: data.supportedModels,
+          credentialFields: data.credentialFields,
         })
       if (updated) {
           await refreshProviderAndAccountData()

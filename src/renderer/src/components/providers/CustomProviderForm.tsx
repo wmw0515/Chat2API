@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -91,7 +92,9 @@ export function CustomProviderForm({
     headers: initialData?.headers || { 'Content-Type': 'application/json' },
     description: initialData?.description || '',
     supportedModels: initialData?.supportedModels || [],
-    credentialFields: initialData?.credentialFields || defaultCredentialFields['token'],
+    credentialFields: initialData?.credentialFields
+      ? initialData.credentialFields.map((field) => ({ ...field }))
+      : defaultCredentialFields['token'].map((field) => ({ ...field })),
   })
 
   const [newModel, setNewModel] = useState('')
@@ -99,12 +102,52 @@ export function CustomProviderForm({
   const [newHeaderValue, setNewHeaderValue] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
 
+  const cloneCredentialFields = (fields: CredentialField[]) =>
+    fields.map((field) => ({ ...field }))
+
   const handleAuthTypeChange = (authType: AuthType) => {
     setFormData({
       ...formData,
       authType,
-      credentialFields: defaultCredentialFields[authType],
+      credentialFields: cloneCredentialFields(defaultCredentialFields[authType]),
     })
+  }
+
+  const handleCredentialFieldChange = (
+    index: number,
+    key: keyof CredentialField,
+    value: CredentialField[keyof CredentialField],
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      credentialFields: prev.credentialFields.map((field, i) =>
+        i === index ? { ...field, [key]: value } : field,
+      ),
+    }))
+  }
+
+  const handleAddCredentialField = () => {
+    setFormData((prev) => ({
+      ...prev,
+      credentialFields: [
+        ...prev.credentialFields,
+        {
+          name: '',
+          label: '',
+          type: 'text',
+          required: false,
+          placeholder: '',
+          helpText: '',
+        },
+      ],
+    }))
+  }
+
+  const handleRemoveCredentialField = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      credentialFields: prev.credentialFields.filter((_, i) => i !== index),
+    }))
   }
 
   const handleAddModel = () => {
@@ -160,13 +203,49 @@ export function CustomProviderForm({
       }
     }
 
+    const trimmedFieldNames = formData.credentialFields.map((field) => field.name.trim())
+    const duplicateFieldNames = new Set<string>()
+    const seenFieldNames = new Set<string>()
+
+    formData.credentialFields.forEach((field, index) => {
+      const trimmedName = trimmedFieldNames[index]
+      const trimmedLabel = field.label.trim()
+
+      if (!trimmedName) {
+        newErrors[`credentialFieldName-${index}`] = 'Credential field name is required'
+      } else if (seenFieldNames.has(trimmedName)) {
+        duplicateFieldNames.add(trimmedName)
+      } else {
+        seenFieldNames.add(trimmedName)
+      }
+
+      if (!trimmedLabel) {
+        newErrors[`credentialFieldLabel-${index}`] = 'Credential field label is required'
+      }
+    })
+
+    if (duplicateFieldNames.size > 0) {
+      newErrors.credentialFields = `Duplicate credential field names: ${Array.from(duplicateFieldNames).join(', ')}`
+    }
+
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
 
   const handleSubmit = () => {
     if (validate()) {
-      onSubmit(formData)
+      const normalizedCredentialFields = formData.credentialFields.map((field) => ({
+        ...field,
+        name: field.name.trim(),
+        label: field.label.trim(),
+        placeholder: field.placeholder?.trim() || undefined,
+        helpText: field.helpText?.trim() || undefined,
+      }))
+
+      onSubmit({
+        ...formData,
+        credentialFields: normalizedCredentialFields,
+      })
       onOpenChange(false)
     }
   }
@@ -321,7 +400,7 @@ export function CustomProviderForm({
               </div>
             </div>
 
-            <div className="space-y-4">
+              <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <Label>{t('providers.credentialFields')}</Label>
                 <TooltipProvider>
@@ -335,15 +414,94 @@ export function CustomProviderForm({
                   </Tooltip>
                 </TooltipProvider>
               </div>
-              <div className="space-y-2 p-3 rounded bg-muted/50">
-                {formData.credentialFields.map((field) => (
-                  <div key={field.name} className="flex items-center gap-2 text-sm">
-                    <Badge variant="outline">{field.name}</Badge>
-                    <span className="text-muted-foreground">{field.label}</span>
-                    <span className="text-muted-foreground">({field.type})</span>
-                    {field.required && <Badge variant="secondary">{t('providers.required')}</Badge>}
+              <div className="space-y-3 p-3 rounded bg-muted/50">
+                {errors.credentialFields && (
+                  <p className="text-xs text-destructive">{errors.credentialFields}</p>
+                )}
+                {formData.credentialFields.map((field, index) => (
+                  <div key={`${field.name || 'credential'}-${index}`} className="space-y-3 rounded-md border p-3 bg-background">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label>{t('providers.headerName')}</Label>
+                        <Input
+                          value={field.name}
+                          onChange={(e) => handleCredentialFieldChange(index, 'name', e.target.value)}
+                          placeholder="sessionToken"
+                        />
+                        {errors[`credentialFieldName-${index}`] && (
+                          <p className="text-xs text-destructive">{errors[`credentialFieldName-${index}`]}</p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('providers.providerName')}</Label>
+                        <Input
+                          value={field.label}
+                          onChange={(e) => handleCredentialFieldChange(index, 'label', e.target.value)}
+                          placeholder="Session Token"
+                        />
+                        {errors[`credentialFieldLabel-${index}`] && (
+                          <p className="text-xs text-destructive">{errors[`credentialFieldLabel-${index}`]}</p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('providers.providerType')}</Label>
+                        <Select
+                          value={field.type}
+                          onValueChange={(value: CredentialField['type']) =>
+                            handleCredentialFieldChange(index, 'type', value)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="text">text</SelectItem>
+                            <SelectItem value="password">password</SelectItem>
+                            <SelectItem value="textarea">textarea</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('providers.headerValue')}</Label>
+                        <Input
+                          value={field.placeholder || ''}
+                          onChange={(e) => handleCredentialFieldChange(index, 'placeholder', e.target.value)}
+                          placeholder="Optional placeholder"
+                        />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label>{t('providers.description')}</Label>
+                        <Input
+                          value={field.helpText || ''}
+                          onChange={(e) => handleCredentialFieldChange(index, 'helpText', e.target.value)}
+                          placeholder="Optional helper text"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={field.required}
+                          onCheckedChange={(checked) => handleCredentialFieldChange(index, 'required', checked)}
+                        />
+                        <span className="text-sm text-muted-foreground">{t('providers.required')}</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveCredentialField(index)}
+                      >
+                        <X className="h-4 w-4 mr-1" />
+                        Remove
+                      </Button>
+                    </div>
                   </div>
                 ))}
+                <Button type="button" variant="outline" className="w-full" onClick={handleAddCredentialField}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add credential field
+                </Button>
               </div>
             </div>
           </div>

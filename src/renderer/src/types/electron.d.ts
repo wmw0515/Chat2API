@@ -92,7 +92,7 @@ interface ProvidersAPI {
     supportedModels?: string[]
     credentialFields?: CredentialField[]
   }) => Promise<Provider>
-  update: (id: string, updates: Partial<Provider>) => Promise<Provider | null>
+  update: (id: string, updates: Partial<Provider> & { credentialFields?: CredentialField[] }) => Promise<Provider | null>
   delete: (id: string) => Promise<boolean>
   checkStatus: (providerId: string) => Promise<ProviderCheckResult>
   checkAllStatus: () => Promise<Record<string, ProviderCheckResult>>
