@@ -68,35 +68,7 @@ export function Providers() {
       
       try {
         useProvidersStore.getState().setIsLoading(true)
-        const [providersData, builtinData, accountsData] = await Promise.all([
-          window.electronAPI.providers.getAll(),
-          window.electronAPI.providers.getBuiltin(),
-          window.electronAPI.accounts.getAll(),
-        ])
-        
-        useProvidersStore.getState().setProviders(providersData)
-        useProvidersStore.getState().setBuiltinProviders(builtinData)
-        useProvidersStore.getState().setAccounts(accountsData)
-        
-        const existingStatuses = useProvidersStore.getState().providerStatuses
-        const statusMap: Record<string, ProviderStatus> = { ...existingStatuses }
-        const countMap: Record<string, { total: number; active: number }> = {}
-        
-        for (const provider of providersData) {
-          if (provider.status) {
-            statusMap[provider.id] = provider.status
-          } else if (!statusMap[provider.id]) {
-            statusMap[provider.id] = 'unknown'
-          }
-          const providerAccounts = accountsData.filter(a => a.providerId === provider.id)
-          countMap[provider.id] = {
-            total: providerAccounts.length,
-            active: providerAccounts.filter(a => a.status === 'active').length,
-          }
-        }
-        
-        useProvidersStore.getState().setProviderStatuses(statusMap)
-        useProvidersStore.getState().setAccountCounts(countMap)
+        await refreshProviderAndAccountData()
       } catch (error) {
         console.error('Failed to load providers:', error)
       } finally {
@@ -106,6 +78,38 @@ export function Providers() {
     
     loadInitialData()
   }, [])
+
+  const refreshProviderAndAccountData = async () => {
+    const [providersData, builtinData, accountsData] = await Promise.all([
+      window.electronAPI.providers.getAll(),
+      window.electronAPI.providers.getBuiltin(),
+      window.electronAPI.accounts.getAll(),
+    ])
+
+    useProvidersStore.getState().setProviders(providersData)
+    useProvidersStore.getState().setBuiltinProviders(builtinData)
+    useProvidersStore.getState().setAccounts(accountsData)
+
+    const existingStatuses = useProvidersStore.getState().providerStatuses
+    const statusMap: Record<string, ProviderStatus> = { ...existingStatuses }
+    const countMap: Record<string, { total: number; active: number }> = {}
+
+    for (const provider of providersData) {
+      if (provider.status) {
+        statusMap[provider.id] = provider.status
+      } else if (!statusMap[provider.id]) {
+        statusMap[provider.id] = 'unknown'
+      }
+      const providerAccounts = accountsData.filter(a => a.providerId === provider.id)
+      countMap[provider.id] = {
+        total: providerAccounts.length,
+        active: providerAccounts.filter(a => a.status === 'active').length,
+      }
+    }
+
+    useProvidersStore.getState().setProviderStatuses(statusMap)
+    useProvidersStore.getState().setAccountCounts(countMap)
+  }
 
   const filteredProviders = store.providers.filter((provider) => {
     const matchesSearch = 
@@ -168,7 +172,7 @@ export function Providers() {
     try {
       const success = await window.electronAPI.providers.delete(id)
       if (success) {
-        store.removeProvider(id)
+        await refreshProviderAndAccountData()
         toast({
           title: t('providers.deleteSuccess'),
           description: t('providers.providerDeleted'),
@@ -341,15 +345,15 @@ export function Providers() {
           description: data.description,
           supportedModels: data.supportedModels,
         })
-        if (updated) {
-          store.updateProvider(editingProvider.id, updated)
+      if (updated) {
+          await refreshProviderAndAccountData()
           toast({
             title: t('providers.updateSuccess'),
             description: t('providers.providerConfigUpdated'),
           })
         }
       } else {
-        const newProvider = await window.electronAPI.providers.add({
+        await window.electronAPI.providers.add({
           name: data.name,
           authType: data.authType,
           apiEndpoint: data.apiEndpoint,
@@ -358,7 +362,7 @@ export function Providers() {
           supportedModels: data.supportedModels,
           credentialFields: data.credentialFields,
         })
-        store.addProvider(newProvider)
+        await refreshProviderAndAccountData()
         toast({
           title: t('providers.createSuccess'),
           description: t('providers.customProviderCreated'),
@@ -384,21 +388,14 @@ export function Providers() {
     if (!store.selectedProviderId) return
     
     try {
-      const account = await window.electronAPI.accounts.add({
+      await window.electronAPI.accounts.add({
         providerId: store.selectedProviderId,
         name: data.name,
         email: data.email,
         credentials: data.credentials,
         dailyLimit: data.dailyLimit,
       })
-      store.addAccount(account)
-      
-      const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
-      store.updateAccountCount(
-        store.selectedProviderId,
-        providerAccounts.length,
-        providerAccounts.filter(a => a.status === 'active').length
-      )
+      await refreshProviderAndAccountData()
       
       setShowAddAccountDialog(false)
       toast({
@@ -421,16 +418,7 @@ export function Providers() {
       
       const updated = await window.electronAPI.accounts.update(id, updates)
       if (updated) {
-        store.updateAccount(id, updates)
-        
-        if (store.selectedProviderId) {
-          const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
-          store.updateAccountCount(
-            store.selectedProviderId,
-            providerAccounts.length,
-            providerAccounts.filter(a => a.status === 'active').length
-          )
-        }
+        await refreshProviderAndAccountData()
         
         toast({
           title: t('providers.updateSuccess'),
@@ -450,17 +438,7 @@ export function Providers() {
     try {
       const success = await window.electronAPI.accounts.delete(id)
       if (success) {
-        const account = store.getAccountById(id)
-        store.removeAccount(id)
-        
-        if (account && store.selectedProviderId) {
-          const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
-          store.updateAccountCount(
-            store.selectedProviderId,
-            providerAccounts.length,
-            providerAccounts.filter(a => a.status === 'active').length
-          )
-        }
+        await refreshProviderAndAccountData()
         
         toast({
           title: t('providers.deleteSuccess'),

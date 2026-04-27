@@ -15,6 +15,8 @@ import { sessionManager } from './sessionManager'
 import ProviderManager from '../store/providers'
 import AccountManager from '../store/accounts'
 import ConfigManager from '../store/config'
+import { ProviderChecker } from '../providers/checker'
+import { validateCredentials } from '../store/validator'
 import fs from 'node:fs'
 import path from 'node:path'
 import mime from 'mime-types'
@@ -155,6 +157,31 @@ export class ProxyServer {
    * Setup routes
    */
   private setupRoutes(): void {
+    const parseDashboardError = (error: unknown): { message: string; code: string } => {
+      if (error instanceof Error) {
+        return { message: error.message, code: 'dashboard_request_failed' }
+      }
+      return { message: 'Unknown error', code: 'dashboard_request_failed' }
+    }
+
+    const withDashboardErrorHandling = (handler: (ctx: Context) => Promise<void> | void) => {
+      return async (ctx: Context): Promise<void> => {
+        try {
+          await handler(ctx)
+        } catch (error) {
+          const normalized = parseDashboardError(error)
+          ctx.status = ctx.status && ctx.status >= 400 ? ctx.status : 400
+          ctx.body = {
+            success: false,
+            error: {
+              code: normalized.code,
+              message: normalized.message,
+            },
+          }
+        }
+      }
+    }
+
     // Register OpenAI API routes
     for (const route of routes) {
       this.router.use(route.routes())
@@ -207,11 +234,11 @@ export class ProxyServer {
       }
     })
 
-    this.router.get('/dashboard-api/config', async (ctx) => {
+    this.router.get('/dashboard-api/config', withDashboardErrorHandling(async (ctx) => {
       ctx.body = ConfigManager.get()
-    })
+    }))
 
-    this.router.put('/dashboard-api/config', async (ctx) => {
+    this.router.put('/dashboard-api/config', withDashboardErrorHandling(async (ctx) => {
       const updates = (ctx.request.body || {}) as Record<string, unknown>
       const validation = ConfigManager.validate(updates)
 
@@ -228,19 +255,137 @@ export class ProxyServer {
         success: true,
         data: ConfigManager.update(updates),
       }
-    })
+    }))
 
-    this.router.get('/dashboard-api/providers', async (ctx) => {
+    this.router.get('/dashboard-api/providers', withDashboardErrorHandling(async (ctx) => {
       ctx.body = ProviderManager.getAll()
-    })
+    }))
 
-    this.router.get('/dashboard-api/providers/builtin', async (ctx) => {
+    this.router.get('/dashboard-api/providers/builtin', withDashboardErrorHandling(async (ctx) => {
       ctx.body = ProviderManager.getBuiltin()
-    })
+    }))
 
-    this.router.get('/dashboard-api/accounts', async (ctx) => {
+    this.router.post('/dashboard-api/providers', withDashboardErrorHandling(async (ctx) => {
+      const body = (ctx.request.body || {}) as any
+      if (!body?.name || !body?.authType || !body?.apiEndpoint) {
+        ctx.status = 400
+        ctx.body = { success: false, error: { code: 'invalid_provider_payload', message: 'name, authType and apiEndpoint are required' } }
+        return
+      }
+      ctx.body = ProviderManager.create(body)
+    }))
+
+    this.router.put('/dashboard-api/providers/:id', withDashboardErrorHandling(async (ctx) => {
+      const updated = ProviderManager.update(ctx.params.id, (ctx.request.body || {}) as any)
+      if (!updated) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
+        return
+      }
+      ctx.body = updated
+    }))
+
+    this.router.delete('/dashboard-api/providers/:id', withDashboardErrorHandling(async (ctx) => {
+      const success = ProviderManager.delete(ctx.params.id)
+      if (!success) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
+        return
+      }
+      ctx.body = { success: true }
+    }))
+
+    this.router.post('/dashboard-api/providers/:id/check-status', withDashboardErrorHandling(async (ctx) => {
+      const provider = ProviderManager.getById(ctx.params.id)
+      if (!provider) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${ctx.params.id}` } }
+        return
+      }
+      ctx.body = await ProviderChecker.checkProviderStatus(provider)
+    }))
+
+    this.router.post('/dashboard-api/providers/check-all-status', withDashboardErrorHandling(async (ctx) => {
+      const providers = ProviderManager.getAll()
+      const entries = await Promise.all(
+        providers.map(async (provider) => [provider.id, await ProviderChecker.checkProviderStatus(provider)] as const),
+      )
+      ctx.body = Object.fromEntries(entries)
+    }))
+
+    this.router.get('/dashboard-api/accounts', withDashboardErrorHandling(async (ctx) => {
+      const providerId = typeof ctx.query.providerId === 'string' ? ctx.query.providerId : undefined
+      if (providerId) {
+        ctx.body = AccountManager.getByProviderId(providerId, false)
+        return
+      }
       ctx.body = AccountManager.getAll(false)
-    })
+    }))
+
+    this.router.get('/dashboard-api/accounts/:id', withDashboardErrorHandling(async (ctx) => {
+      const includeCredentials = String(ctx.query.includeCredentials || '0') === '1'
+      const account = AccountManager.getById(ctx.params.id, includeCredentials)
+      if (!account) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'account_not_found', message: `Account not found: ${ctx.params.id}` } }
+        return
+      }
+      ctx.body = account
+    }))
+
+    this.router.post('/dashboard-api/accounts', withDashboardErrorHandling(async (ctx) => {
+      const body = (ctx.request.body || {}) as any
+      if (!body?.providerId || !body?.name || !body?.credentials || typeof body.credentials !== 'object') {
+        ctx.status = 400
+        ctx.body = { success: false, error: { code: 'invalid_account_payload', message: 'providerId, name and credentials are required' } }
+        return
+      }
+      ctx.body = AccountManager.create(body)
+    }))
+
+    this.router.put('/dashboard-api/accounts/:id', withDashboardErrorHandling(async (ctx) => {
+      const updated = AccountManager.update(ctx.params.id, (ctx.request.body || {}) as any)
+      if (!updated) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'account_not_found', message: `Account not found: ${ctx.params.id}` } }
+        return
+      }
+      ctx.body = updated
+    }))
+
+    this.router.delete('/dashboard-api/accounts/:id', withDashboardErrorHandling(async (ctx) => {
+      const success = AccountManager.delete(ctx.params.id)
+      if (!success) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'account_not_found', message: `Account not found: ${ctx.params.id}` } }
+        return
+      }
+      ctx.body = { success: true }
+    }))
+
+    this.router.post('/dashboard-api/accounts/:id/validate', withDashboardErrorHandling(async (ctx) => {
+      const result = await AccountManager.validate(ctx.params.id)
+      if (!result.valid) {
+        ctx.status = 400
+      }
+      ctx.body = result
+    }))
+
+    this.router.post('/dashboard-api/accounts/validate-token', withDashboardErrorHandling(async (ctx) => {
+      const body = (ctx.request.body || {}) as { providerId?: string; credentials?: Record<string, string> }
+      if (!body.providerId || !body.credentials) {
+        ctx.status = 400
+        ctx.body = { success: false, error: { code: 'invalid_validation_payload', message: 'providerId and credentials are required' } }
+        return
+      }
+      const provider = ProviderManager.getById(body.providerId)
+      if (!provider) {
+        ctx.status = 404
+        ctx.body = { success: false, error: { code: 'provider_not_found', message: `Provider not found: ${body.providerId}` } }
+        return
+      }
+      ctx.body = await validateCredentials(provider, body.credentials)
+    }))
 
     this.router.get('/dashboard-api/statistics', async (ctx) => {
       ctx.body = storeManager.getStatistics()

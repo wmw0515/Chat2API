@@ -163,7 +163,7 @@ For security, you can enable API Key authentication:
 3. Enter a name and description
 4. Copy the generated key
 
-## 🧪 Headless Server Mode (Phase 1)
+## 🧪 Headless Server Mode
 
 You can now run the OpenAI-compatible proxy without launching Electron UI/tray:
 
@@ -180,8 +180,9 @@ CHAT2API_HOST=0.0.0.0 CHAT2API_PORT=8080 npm run start:headless
 ```
 
 Notes:
-- This is backend-only mode (no dashboard migration yet).
-- See `docs/headless-phase1.md` for architecture notes and limitations.
+- Headless mode now includes a minimal browser dashboard workflow for provider/account credential management at `http://<host>:<port>/#/providers`.
+- This browser flow is intentionally scoped to provider/account CRUD + credential validation (not full desktop parity).
+- See `docs/headless-phase1.md` for architecture notes, run instructions, and current limitations.
 
 ## 📸 Screenshots
 

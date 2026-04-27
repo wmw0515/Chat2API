@@ -1,4 +1,4 @@
-# Headless Mode (Phase 1)
+# Headless Mode (Phase 1 + Browser Management Follow-up)
 
 This phase adds a minimal backend-only runtime that starts the existing OpenAI-compatible proxy without Electron windows, tray, or IPC UI bootstrapping.
 
@@ -30,10 +30,29 @@ Example:
 CHAT2API_HOST=0.0.0.0 CHAT2API_PORT=8080 npm run start:headless
 ```
 
-## Current limitations (intentionally out of scope for Phase 1)
+## Browser dashboard support (follow-up scope)
 
-- No dashboard/UI migration (Electron renderer is unchanged).
-- No IPC-driven management UX in headless mode (use API endpoints directly).
+Headless mode now serves the built renderer and a `/dashboard-api` surface that supports a practical provider/account workflow from the browser:
+
+- Open dashboard in browser.
+- View providers and accounts.
+- Add/update/delete providers and accounts.
+- Validate credentials (per-account and pre-save token validation).
+- Persist data through the same store used by desktop/headless runtimes.
+
+Recommended run/test flow:
+
+```bash
+npm install
+npm run build
+npm run start:headless
+# open http://127.0.0.1:8080/#/providers
+```
+
+## Current limitations (intentionally out of scope)
+
+- Browser/headless mode is intentionally not full dashboard parity (proxy settings, models, logs, sessions, about, and advanced desktop UX remain desktop-focused).
+- No full OAuth browser automation migration for web mode.
 - Storage encryption differs by runtime:
   - Electron mode uses `safeStorage`.
   - Headless mode stores credentials without `safeStorage`-based encryption.
