@@ -93,6 +93,13 @@ export function installBrowserApiShim() {
       delete: (id: string) => request(`/providers/${id}`, { method: 'DELETE' }).then(() => true),
       checkStatus: (providerId: string) => request(`/providers/${providerId}/check-status`, { method: 'POST' }),
       checkAllStatus: () => request('/providers/check-all-status', { method: 'POST' }),
+      getEffectiveModels: (providerId: string) => request(`/providers/${providerId}/effective-models`),
+      addCustomModel: (providerId: string, model: { displayName: string; actualModelId: string }) =>
+        request(`/providers/${providerId}/models`, { method: 'POST', body: model }),
+      removeModel: (providerId: string, modelName: string) =>
+        request(`/providers/${providerId}/models/${encodeURIComponent(modelName)}`, { method: 'DELETE' }),
+      resetModels: (providerId: string) =>
+        request(`/providers/${providerId}/models/reset`, { method: 'POST' }),
       duplicate: async () => {
         throw new Error('Duplicate provider is not supported in browser headless mode')
       },

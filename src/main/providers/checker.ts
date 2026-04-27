@@ -2,6 +2,7 @@ import axios, { AxiosError } from 'axios'
 import { getBuiltinProvider } from './builtin'
 import type { Provider, ProviderCheckResult, Account } from '../../shared/types'
 import type { BuiltinProviderConfig } from '../store/types'
+import { normalizeMimoCredentials } from './mimoCredentials'
 
 const CHECK_TIMEOUT = 15000
 
@@ -161,20 +162,69 @@ export class ProviderChecker {
     }
   }
 
-  private static checkMimoToken(
+  private static async checkMimoToken(
     serviceToken: string,
     userId: string,
     phToken: string
-  ): TokenCheckResult {
-    if (!serviceToken || !userId || !phToken) {
+  ): Promise<TokenCheckResult> {
+    const normalized = normalizeMimoCredentials({
+      service_token: serviceToken,
+      user_id: userId,
+      ph_token: phToken,
+    })
+
+    if (!normalized.serviceToken || !normalized.userId || !normalized.phToken) {
       return { valid: false, error: 'Missing required credentials: service_token, user_id, ph_token' }
     }
 
-    return {
-      valid: true,
-      userInfo: {
-        name: 'Mimo User',
-      },
+    try {
+      const response = await axios({
+        method: 'POST',
+        url: `https://aistudio.xiaomimimo.com/open-apis/bot/chat?xiaomichatbot_ph=${encodeURIComponent(normalized.phToken)}`,
+        data: {
+          msgId: `validate_${Date.now()}`,
+          conversationId: `validate_${Date.now()}`,
+          query: 'ping',
+          isEditedQuery: false,
+          modelConfig: {
+            enableThinking: false,
+            webSearchStatus: 'disabled',
+            model: 'mimo-v2-flash-studio',
+            temperature: 0.1,
+            topP: 0.95,
+          },
+          multiMedias: [],
+        },
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `serviceToken=${normalized.serviceToken}; userId=${normalized.userId}; xiaomichatbot_ph=${normalized.phToken}`,
+          Origin: 'https://aistudio.xiaomimimo.com',
+          Referer: 'https://aistudio.xiaomimimo.com/',
+          'X-Timezone': 'Asia/Shanghai',
+          Accept: '*/*',
+        },
+        timeout: CHECK_TIMEOUT,
+        validateStatus: () => true,
+      })
+
+      if (response.status === 401 || response.status === 403) {
+        return { valid: false, error: `Validation failed: HTTP ${response.status}` }
+      }
+      if (response.status >= 200 && response.status < 300) {
+        return {
+          valid: true,
+          userInfo: {
+            name: 'Mimo User',
+          },
+        }
+      }
+
+      return { valid: false, error: `Validation failed: HTTP ${response.status}` }
+    } catch (error) {
+      return {
+        valid: false,
+        error: error instanceof AxiosError ? error.message : 'Connection failed',
+      }
     }
   }
 

@@ -17,6 +17,7 @@ import {
   AdapterConfig,
   OAuthCallbackData,
 } from '../types'
+import { normalizeMimoCredentials } from '../../providers/mimoCredentials'
 
 const MIMO_WEB_BASE = 'https://aistudio.xiaomimimo.com'
 
@@ -43,9 +44,7 @@ export class MimoAdapter extends BaseOAuthAdapter {
   async loginWithCookies(providerId: string, cookies: Record<string, string>): Promise<OAuthResult> {
     this.emitProgress('pending', 'Validating cookies...')
 
-    const serviceToken = cookies['serviceToken'] || cookies['service_token']
-    const userId = cookies['userId'] || cookies['user_id']
-    const phToken = cookies['xiaomichatbot_ph'] || cookies['ph_token']
+    const { serviceToken, userId, phToken } = normalizeMimoCredentials(cookies)
 
     if (!serviceToken || !userId || !phToken) {
       const missing = []
@@ -84,9 +83,7 @@ export class MimoAdapter extends BaseOAuthAdapter {
   }
 
   async validateToken(credentials: Record<string, string>): Promise<TokenValidationResult> {
-    const serviceToken = credentials['service_token'] || credentials['serviceToken']
-    const userId = credentials['user_id'] || credentials['userId']
-    const phToken = credentials['ph_token'] || credentials['xiaomichatbot_ph']
+    const { serviceToken, userId, phToken } = normalizeMimoCredentials(credentials)
 
     if (!serviceToken || !userId || !phToken) {
       return {
@@ -106,9 +103,7 @@ export class MimoAdapter extends BaseOAuthAdapter {
   }
 
   async refreshToken(credentials: Record<string, string>): Promise<CredentialInfo | null> {
-    const serviceToken = credentials['service_token'] || credentials['serviceToken']
-    const userId = credentials['user_id'] || credentials['userId']
-    const phToken = credentials['ph_token'] || credentials['xiaomichatbot_ph']
+    const { serviceToken, userId, phToken } = normalizeMimoCredentials(credentials)
 
     if (!serviceToken || !userId || !phToken) {
       return null

@@ -6,6 +6,7 @@
 import axios, { AxiosResponse } from 'axios'
 import { PassThrough } from 'stream'
 import { Account, Provider } from '../../store/types'
+import { normalizeMimoCredentials } from '../../providers/mimoCredentials'
 
 const MIMO_API_BASE = 'https://aistudio.xiaomimimo.com'
 
@@ -260,12 +261,7 @@ export class MimoAdapter {
   }
 
   private getCredentials(): { serviceToken: string; userId: string; phToken: string } {
-    const credentials = this.account.credentials
-    return {
-      serviceToken: credentials.service_token || '',
-      userId: credentials.user_id || '',
-      phToken: credentials.ph_token || '',
-    }
+    return normalizeMimoCredentials(this.account.credentials)
   }
 
   static isMimoProvider(provider: Provider): boolean {
