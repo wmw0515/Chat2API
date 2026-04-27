@@ -13,6 +13,7 @@ import type {
   ModelMapping,
   AppConfig,
   AccountStatus,
+  AccountHealthStatus,
   ProviderType,
   ProviderVendor,
   ProviderStatus,
@@ -38,6 +39,7 @@ export type {
   ModelMapping,
   AppConfig,
   AccountStatus,
+  AccountHealthStatus,
   ProviderType,
   ProviderVendor,
   ProviderStatus,
@@ -133,7 +135,14 @@ interface AccountsAPI {
   }) => Promise<Account>
   update: (id: string, updates: Partial<Account>) => Promise<Account | null>
   delete: (id: string) => Promise<boolean>
-  validate: (accountId: string) => Promise<boolean>
+  validate: (accountId: string) => Promise<{
+    valid: boolean
+    error?: string
+    validatedAt: number
+    healthStatus?: AccountHealthStatus
+    lastValidationError?: string
+    lastValidationLatency?: number
+  }>
   validateToken: (providerId: string, credentials: Record<string, string>) => Promise<{
     valid: boolean
     error?: string

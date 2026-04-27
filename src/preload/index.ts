@@ -153,7 +153,14 @@ const accountsAPI = {
   delete: (id: string): Promise<boolean> => 
     ipcRenderer.invoke(IpcChannels.ACCOUNTS_DELETE, id),
   
-  validate: (accountId: string): Promise<boolean> => 
+  validate: (accountId: string): Promise<{
+    valid: boolean
+    error?: string
+    validatedAt: number
+    healthStatus?: 'unknown' | 'active' | 'invalid' | 'expired' | 'rate_limited' | 'network_error' | 'error'
+    lastValidationError?: string
+    lastValidationLatency?: number
+  }> => 
     ipcRenderer.invoke(IpcChannels.ACCOUNTS_VALIDATE, accountId),
   
   validateToken: (providerId: string, credentials: Record<string, string>): Promise<{

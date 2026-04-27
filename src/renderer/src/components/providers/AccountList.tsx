@@ -157,6 +157,8 @@ export function AccountList({
     return account.todayUsed || 0
   }
 
+  const formatHealthStatus = (healthStatus?: Account['healthStatus']) => healthStatus || 'unknown'
+
   if (accounts.length === 0) {
     return (
       <Card>
@@ -222,6 +224,9 @@ export function AccountList({
                             <StatusIcon className="mr-1 h-3 w-3" />
                             {t(config.labelKey)}
                           </Badge>
+                          <Badge variant="secondary" className="text-xs">
+                            Health: {formatHealthStatus(account.healthStatus)}
+                          </Badge>
                         </div>
                         
                         <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
@@ -230,8 +235,17 @@ export function AccountList({
                           )}
                           <span>{t('dashboard.totalRequests')}: {account.requestCount || 0}</span>
                           <span>{t('providers.usedToday')}: {formatUsage(account)}</span>
+                          {account.lastValidatedAt && (
+                            <span>Validated: {formatDate(account.lastValidatedAt)}</span>
+                          )}
                         </div>
                         
+                        {account.lastValidationError && (
+                          <p className="text-xs text-red-500 mt-1 truncate">
+                            Last validation: {account.lastValidationError}
+                          </p>
+                        )}
+
                         {account.status === 'error' && account.errorMessage && (
                           <p className="text-xs text-red-500 mt-1 truncate">
                             {account.errorMessage}

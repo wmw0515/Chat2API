@@ -105,8 +105,8 @@ export function installBrowserApiShim() {
       add: (data: any) => request('/accounts', { method: 'POST', body: data }),
       update: (id: string, updates: any) => request(`/accounts/${id}`, { method: 'PUT', body: updates }),
       delete: (id: string) => request(`/accounts/${id}`, { method: 'DELETE' }).then(() => true),
-      validate: async (accountId: string) =>
-        request<{ valid: boolean }>(`/accounts/${accountId}/validate`, { method: 'POST' }).then((result) => Boolean(result?.valid)),
+      validate: (accountId: string) =>
+        request(`/accounts/${accountId}/validate`, { method: 'POST' }),
       validateToken: (providerId: string, credentials: Record<string, string>) =>
         request('/accounts/validate-token', { method: 'POST', body: { providerId, credentials } }),
     },

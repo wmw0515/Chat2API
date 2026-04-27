@@ -292,7 +292,31 @@ export function AccountDetail({
                 </div>
                 <span className="text-sm">{formatDate(account.updatedAt)}</span>
               </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Health Status</span>
+                <Badge variant="secondary" className="text-xs">
+                  {account.healthStatus || 'unknown'}
+                </Badge>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Last Validated</span>
+                <span className="text-sm">{formatDate(account.lastValidatedAt)}</span>
+              </div>
             </div>
+
+            {account.lastValidationError && (
+              <div className="mt-4 p-3 bg-red-50 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-red-700">Last Validation Error</p>
+                    <p className="text-sm text-red-600 mt-1">{account.lastValidationError}</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {account.status === 'error' && account.errorMessage && (
               <div className="mt-4 p-3 bg-red-50 rounded-lg">

@@ -1,4 +1,5 @@
 export type AccountStatus = 'active' | 'inactive' | 'expired' | 'error'
+export type AccountHealthStatus = 'unknown' | 'active' | 'invalid' | 'expired' | 'rate_limited' | 'network_error' | 'error'
 
 export type ProviderStatus = 'online' | 'offline' | 'unknown'
 
@@ -44,6 +45,10 @@ export interface Account {
   requestCount?: number
   dailyLimit?: number
   todayUsed?: number
+  healthStatus?: AccountHealthStatus
+  lastValidatedAt?: number
+  lastValidationError?: string
+  lastValidationLatency?: number
 }
 
 export interface Provider {
@@ -167,6 +172,9 @@ export interface ValidationResult {
     used?: number
     expiresAt?: number
   }
+  healthStatus?: AccountHealthStatus
+  lastValidationError?: string
+  lastValidationLatency?: number
 }
 
 export type PromptType = 'general' | 'tool-use' | 'agent' | 'translation' | 'search'
