@@ -34,6 +34,8 @@ export const IpcChannels = {
   PROVIDERS_ADD_CUSTOM_MODEL: 'providers:addCustomModel',
   PROVIDERS_REMOVE_MODEL: 'providers:removeModel',
   PROVIDERS_RESET_MODELS: 'providers:resetModels',
+  PROVIDERS_CHECK_MODEL: 'providers:checkModel',
+  PROVIDERS_CHECK_ALL_MODELS: 'providers:checkAllModels',
   PROVIDERS_GET_PRESETS: 'providers:getPresets',
   PROVIDERS_CREATE_PRESET: 'providers:createPreset',
   PROVIDERS_UPDATE_PRESET: 'providers:updatePreset',
@@ -52,6 +54,7 @@ export const IpcChannels = {
   ACCOUNTS_VALIDATE_TOKEN: 'accounts:validateToken',
   ACCOUNTS_GET_CREDITS: 'accounts:getCredits',
   ACCOUNTS_CLEAR_CHATS: 'accounts:clearChats',
+  ACCOUNTS_CHECK: 'accounts:check',
 
   OAUTH_START_LOGIN: 'oauth:startLogin',
   OAUTH_CANCEL_LOGIN: 'oauth:cancelLogin',

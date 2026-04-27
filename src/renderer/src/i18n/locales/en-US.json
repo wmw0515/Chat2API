@@ -200,6 +200,7 @@
     "validationSuccess": "Validation Successful",
     "quota": "Quota",
     "validateCredentials": "Validate Credentials",
+    "checkAccount": "Check Account",
     "clearChats": "Clear Chat History",
     "clearChatsConfirm": "Are you sure you want to clear all chat history for this account?",
     "clearChatsWarning": "This will delete all conversation history on this provider's website and cannot be undone.",

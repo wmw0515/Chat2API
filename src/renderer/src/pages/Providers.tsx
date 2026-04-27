@@ -461,15 +461,13 @@ export function Providers() {
 
   const handleValidateAccount = async (id: string) => {
     try {
-      const validationResult = await window.electronAPI.accounts.validate(id)
-      const isValid = validationResult.valid
-      if (isValid) {
+      const checkResult = await window.electronAPI.accounts.check(id)
+      if (checkResult.success) {
         store.updateAccount(id, {
           status: 'active',
-          healthStatus: validationResult.healthStatus || 'active',
-          lastValidatedAt: validationResult.validatedAt,
+          healthStatus: 'active',
+          lastValidatedAt: checkResult.checkedAt,
           lastValidationError: undefined,
-          lastValidationLatency: validationResult.lastValidationLatency,
         })
         
         if (store.selectedProviderId) {
@@ -482,17 +480,24 @@ export function Providers() {
         }
         
         toast({
-          title: t('providers.credentialsValid'),
-          description: t('providers.accountHealthStatus', { status: validationResult.healthStatus || 'active' }),
+          title: t('providers.checkAccount'),
+          description: '模型可用',
         })
       } else {
+        const healthStatus = checkResult.status === 'credential_error' ? 'invalid' : 'error'
+        const messageMap: Record<string, string> = {
+          credential_error: '凭证失效',
+          model_invalid: '模型无效',
+          connection_error: '连接异常',
+          unknown_error: '未知错误',
+        }
+        const message = messageMap[checkResult.status] || '未知错误'
         store.updateAccount(id, {
-          status: 'error',
-          errorMessage: validationResult.error || t('providers.validateFailed'),
-          healthStatus: validationResult.healthStatus || 'error',
-          lastValidatedAt: validationResult.validatedAt || Date.now(),
-          lastValidationError: validationResult.lastValidationError || validationResult.error,
-          lastValidationLatency: validationResult.lastValidationLatency,
+          ...(healthStatus === 'invalid' ? { status: 'error' as const } : {}),
+          errorMessage: checkResult.errorMessage || message,
+          healthStatus,
+          lastValidatedAt: checkResult.checkedAt || Date.now(),
+          lastValidationError: checkResult.errorMessage || message,
         })
         
         if (store.selectedProviderId) {
@@ -504,15 +509,9 @@ export function Providers() {
           )
         }
         
-        const failedHealthStatus = validationResult.healthStatus || 'error'
-        const failedMessage = validationResult.error || validationResult.lastValidationError || t('providers.credentialsInvalid')
-
         toast({
-          title: t('providers.credentialsValidationFailed'),
-          description: t('providers.accountHealthStatusWithError', {
-            status: failedHealthStatus,
-            error: failedMessage ? ` • ${failedMessage}` : '',
-          }),
+          title: t('providers.checkAccount'),
+          description: message,
           variant: 'destructive',
         })
       }

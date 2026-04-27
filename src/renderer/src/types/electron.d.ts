@@ -153,6 +153,34 @@ interface ProvidersAPI {
     models: EffectiveModel[]
     error?: string
   }>
+  checkModel: (providerId: string, modelId: string) => Promise<{
+    success: boolean
+    providerId: string
+    accountId: string
+    model: string
+    actualModel: string
+    status: 'available' | 'credential_error' | 'model_invalid' | 'connection_error' | 'unknown_error'
+    errorCode?: string
+    errorMessage?: string
+    checkedAt: number
+  }>
+  checkAllModels: (providerId: string) => Promise<{
+    providerId: string
+    checked: number
+    available: number
+    failed: number
+    results: Array<{
+      success: boolean
+      providerId: string
+      accountId: string
+      model: string
+      actualModel: string
+      status: 'available' | 'credential_error' | 'model_invalid' | 'connection_error' | 'unknown_error'
+      errorCode?: string
+      errorMessage?: string
+      checkedAt: number
+    }>
+  }>
 }
 
 interface AccountsAPI {
@@ -183,6 +211,17 @@ interface AccountsAPI {
       quota?: number
       used?: number
     }
+  }>
+  check: (accountId: string) => Promise<{
+    success: boolean
+    providerId: string
+    accountId: string
+    model: string
+    actualModel: string
+    status: 'available' | 'credential_error' | 'model_invalid' | 'connection_error' | 'unknown_error'
+    errorCode?: string
+    errorMessage?: string
+    checkedAt: number
   }>
   getById: (id: string, includeCredentials?: boolean) => Promise<Account | null>
   getByProvider: (providerId: string) => Promise<Account[]>

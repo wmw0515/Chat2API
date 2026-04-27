@@ -109,6 +109,10 @@ export function installBrowserApiShim() {
         request(`/providers/${providerId}/models/${encodeURIComponent(modelName)}`, { method: 'DELETE' }),
       resetModels: (providerId: string) =>
         request(`/providers/${providerId}/models/reset`, { method: 'POST' }),
+      checkModel: (providerId: string, modelId: string) =>
+        request(`/providers/${providerId}/models/${encodeURIComponent(modelId)}/check`, { method: 'POST' }),
+      checkAllModels: (providerId: string) =>
+        request(`/providers/${providerId}/models/check-all`, { method: 'POST' }),
       duplicate: async () => {
         throw new Error('Duplicate provider is not supported in browser headless mode')
       },
@@ -123,6 +127,8 @@ export function installBrowserApiShim() {
       delete: (id: string) => request(`/accounts/${id}`, { method: 'DELETE' }).then(() => true),
       validate: (accountId: string) =>
         request(`/accounts/${accountId}/validate`, { method: 'POST' }),
+      check: (accountId: string) =>
+        request(`/accounts/${accountId}/check`, { method: 'POST' }),
       validateToken: (providerId: string, credentials: Record<string, string>) =>
         request('/accounts/validate-token', { method: 'POST', body: { providerId, credentials } }),
     },
