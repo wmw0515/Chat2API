@@ -58,8 +58,8 @@
     "daysAgo": "{{count}}d ago"
   },
   "providers": {
-    "title": "Provider Management",
-    "subtitle": "Manage your API provider configurations and accounts",
+    "title": "Model Providers",
+    "subtitle": "Manage built-in and custom model provider configurations and accounts",
     "addProvider": "Add Provider",
     "editProvider": "Edit Provider",
     "deleteProvider": "Delete Provider",
@@ -252,7 +252,15 @@
     "authCookie": "Cookie",
     "authCookieDesc": "Use Cookie authentication",
     "authOAuth": "OAuth",
-    "authOAuthDesc": "OAuth login based authentication"
+    "authOAuthDesc": "OAuth login based authentication",
+    "addCustomProvider": "Add Custom Provider",
+    "headers": "Headers (JSON)",
+    "editConfig": "Edit Config",
+    "resetDefaults": "Reset Defaults",
+    "overrideActive": "Override active",
+    "customProviderFormNotice": "Create a custom provider from a clean blank form. Presets are hidden to keep the flow simple and stable.",
+    "resetSuccess": "Reset successful",
+    "builtinDefaultsRestored": "Built-in provider defaults restored"
   },
   "loginGuide": {
     "getToken": "Get {{provider}} Credentials",
