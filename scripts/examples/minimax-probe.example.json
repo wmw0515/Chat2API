@@ -1,0 +1,29 @@
+{
+  "provider": "minimax",
+  "request": {
+    "method": "POST",
+    "url": "https://agent.minimaxi.com/matrix/api/v1/chat/send_msg?device_platform=web&biz_id=3&app_id=3001&version_code=22201&unix=1777358495000&timezone_offset=28800&lang=zh&sys_language=zh&uuid=example-web-uuid&device_id=example-device-id&os_name=Windows&browser_name=firefox&cpu_core_num=8&browser_language=zh-CN&browser_platform=Win32&user_id=example-user-id&screen_width=1920&screen_height=1080&token=example-token&client=web",
+    "headers": {
+      "cookie": "session_id=example-cookie; csrf_token=example-csrf",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+      "origin": "https://agent.minimaxi.com",
+      "referer": "https://agent.minimaxi.com/"
+    },
+    "body": {
+      "msg_type": 1,
+      "text": "请只回复 minimax-ok",
+      "chat_type": 2,
+      "chat_id": 392410825527470,
+      "attachments": [],
+      "selected_mcp_tools": [],
+      "sub_agent_ids": [
+        340123961561242,
+        340123961561243
+      ],
+      "model_option": {
+        "display_name": "MiniMax-M2.7",
+        "model_type": 501
+      }
+    }
+  }
+}
