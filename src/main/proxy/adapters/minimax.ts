@@ -133,10 +133,35 @@ const MINIMAX_SEND_DEBUG = process.env.CHAT2API_MINIMAX_SEND_DEBUG === '1'
 function sanitizeCookieHeaderValue(rawValue: string): string {
   return rawValue
     .trim()
-    .replace(/[\r\n\t]+/g, '; ')
+    .replace(/[\r\n\t]+/g, '')
     .replace(/[\x00-\x1F\x7F]/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim()
+}
+
+function normalizeMiniMaxChatId(rawValue: unknown): string | number | undefined {
+  if (rawValue === undefined || rawValue === null) {
+    return undefined
+  }
+
+  if (typeof rawValue === 'number') {
+    if (!Number.isFinite(rawValue) || !Number.isInteger(rawValue) || rawValue < 0) {
+      return undefined
+    }
+    return Number.isSafeInteger(rawValue) ? rawValue : undefined
+  }
+
+  const normalized = String(rawValue).trim()
+  if (!normalized || !/^\d+$/.test(normalized)) {
+    return undefined
+  }
+
+  const asNumber = Number(normalized)
+  if (Number.isSafeInteger(asNumber)) {
+    return asNumber
+  }
+
+  return normalized
 }
 
 function summarizeMiniMaxSendMsgRequest(
@@ -144,7 +169,8 @@ function summarizeMiniMaxSendMsgRequest(
   uri: string,
   userData: Record<string, any>,
   headers: Record<string, string>,
-  data: any
+  data: any,
+  configuredChatId?: string | number
 ): Record<string, any> {
   const queryKeys = Object.keys(userData).filter((key) => userData[key] !== undefined && userData[key] !== null)
   const cookieHeader = headers.Cookie || ''
@@ -158,6 +184,7 @@ function summarizeMiniMaxSendMsgRequest(
     tokenLength: tokenInQuery.length,
     hasCookieHeader: Boolean(cookieHeader),
     cookieLength: cookieHeader.length,
+    hasConfiguredChatId: configuredChatId !== undefined,
     hasTokenHeader: Boolean(headers.token),
     hasAuthorizationHeader: Boolean(headers.Authorization),
     hasReferer: Boolean(headers.Referer),
@@ -174,6 +201,8 @@ function summarizeMiniMaxSendMsgRequest(
     body_chat_type: data?.chat_type,
     body_msg_type: data?.msg_type,
     bodyHasChatId: data?.chat_id !== undefined && data?.chat_id !== null,
+    chatIdType: data?.chat_id === undefined || data?.chat_id === null ? 'none' : typeof data.chat_id,
+    chatIdLength: data?.chat_id === undefined || data?.chat_id === null ? 0 : String(data.chat_id).length,
     body_model_option_display_name: modelOption.display_name,
     body_model_option_model_type: modelOption.model_type,
     sub_agent_ids_length: Array.isArray(data?.sub_agent_ids) ? data.sub_agent_ids.length : 0,
@@ -294,6 +323,7 @@ export class MiniMaxAdapter {
   private jwtToken: string
   private realUserID: string
   private cookies: string
+  private configuredChatId?: string | number
   private model: string
   private created: number
 
@@ -302,6 +332,10 @@ export class MiniMaxAdapter {
     this.account = account
     this.rawToken = account.credentials.token || ''
     this.cookies = sanitizeCookieHeaderValue(String(account.credentials.cookies || ''))
+    this.configuredChatId = normalizeMiniMaxChatId(account.credentials.chatId)
+    if (account.credentials.chatId !== undefined && this.configuredChatId === undefined) {
+      console.warn('[MiniMax] Ignoring invalid chatId credential: expected numeric or numeric string')
+    }
     this.model = 'MiniMax-M2.7'
     this.created = unixTimestamp()
 
@@ -457,7 +491,7 @@ export class MiniMaxAdapter {
     }
 
     if (MINIMAX_SEND_DEBUG) {
-      console.log('[MiniMax][send_msg][request]', summarizeMiniMaxSendMsgRequest(method, uri, userData, requestHeaders, data))
+      console.log('[MiniMax][send_msg][request]', summarizeMiniMaxSendMsgRequest(method, uri, userData, requestHeaders, data, this.configuredChatId))
     }
 
     const response = await axios.request({
@@ -534,12 +568,13 @@ export class MiniMaxAdapter {
     const requestBody = this.messagesPrepare(messages, this.model, toolsPrompt)
     
     let msgId: string = ''
-    let chatId: string = request.chatId || ''
-    
-    if (chatId) {
+    const effectiveChatId = request.chatId || (this.configuredChatId !== undefined ? String(this.configuredChatId) : '')
+    let chatId: string = effectiveChatId
+
+    if (effectiveChatId) {
       const sendResponse = await this.requestWebSendMsg('POST', '/matrix/api/v1/chat/send_msg', {
         ...requestBody,
-        chat_id: chatId,
+        chat_id: this.configuredChatId !== undefined && !request.chatId ? this.configuredChatId : effectiveChatId,
       }, deviceInfo)
       const { code, message } = parseMiniMaxError(sendResponse.data)
       if (sendResponse.status !== 200 || code !== 0) {

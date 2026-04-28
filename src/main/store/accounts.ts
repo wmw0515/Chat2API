@@ -15,7 +15,7 @@ export class AccountManager {
   private static sanitizeMiniMaxCookie(rawValue: string): string {
     return rawValue
       .trim()
-      .replace(/[\r\n\t]+/g, '; ')
+      .replace(/[\r\n\t]+/g, '')
       .replace(/[\x00-\x1F\x7F]/g, '')
       .replace(/\s{2,}/g, ' ')
       .trim()

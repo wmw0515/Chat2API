@@ -341,6 +341,22 @@ export function AddProviderDialog({
           placeholder: t('minimax.realUserIDPlaceholder'),
           helpText: t('minimax.realUserIDHelp'),
         },
+        {
+          name: 'cookies',
+          label: t('minimax.cookies'),
+          type: 'password',
+          required: false,
+          placeholder: t('minimax.cookiesPlaceholder'),
+          helpText: t('minimax.cookiesHelp'),
+        },
+        {
+          name: 'chatId',
+          label: t('minimax.chatId'),
+          type: 'text',
+          required: false,
+          placeholder: t('minimax.chatIdPlaceholder'),
+          helpText: t('minimax.chatIdHelp'),
+        },
       ],
     },
     {
@@ -664,6 +680,16 @@ export function AddProviderDialog({
                   label: t('minimax.realUserID'),
                   placeholder: t('minimax.realUserIDPlaceholder'),
                   helpText: t('minimax.realUserIDHelp'),
+                },
+                cookies: {
+                  label: t('minimax.cookies'),
+                  placeholder: t('minimax.cookiesPlaceholder'),
+                  helpText: t('minimax.cookiesHelp'),
+                },
+                chatId: {
+                  label: t('minimax.chatId'),
+                  placeholder: t('minimax.chatIdPlaceholder'),
+                  helpText: t('minimax.chatIdHelp'),
                 },
               },
               qwen: {
