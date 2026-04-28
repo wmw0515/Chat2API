@@ -20,6 +20,8 @@ interface StreamChunk {
   o?: string
 }
 
+type FragmentKind = 'thinking' | 'content' | ''
+
 export class DeepSeekStreamHandler {
   private model: string
   private sessionId: string
@@ -175,52 +177,32 @@ export class DeepSeekStreamHandler {
       this.messageId = chunk.response_message_id
     }
 
-    const previousPath = this.currentPath
-
     if (chunk.v && typeof chunk.v === 'object' && chunk.v.response) {
-      const isThinkingNow = chunk.v.response.thinking_enabled
-      this.currentPath = isThinkingNow ? 'thinking' : 'content'
-      
       const fragments = chunk.v.response.fragments
       if (Array.isArray(fragments) && fragments.length > 0) {
         handledFragments = true
         for (const fragment of fragments) {
-          if (fragment.content) {
-            const fragmentType = fragment.type
-            const fragmentContent = fragment.content
-            
-            if (fragmentType === 'THINK') {
-              this.sendContent(fragmentContent, 'thinking', transStream, isSilentModel, isFoldModel, isSearchSilentModel)
-            } else if (fragmentType === 'ANSWER' || fragmentType === 'RESPONSE') {
-              this.sendContent(fragmentContent, 'content', transStream, isSilentModel, isFoldModel, isSearchSilentModel)
-            }
+          const kind = this.getFragmentKind(fragment?.type)
+          if (kind) {
+            this.currentPath = kind
+          }
+          if (fragment?.content && kind) {
+            this.sendContent(fragment.content, kind, transStream, isSilentModel, isFoldModel, isSearchSilentModel)
           }
         }
       }
-    } else if (chunk.p === 'response/fragments') {
+    } else if (chunk.p === 'response/fragments' && chunk.o === 'APPEND') {
       if (Array.isArray(chunk.v)) {
         handledFragments = true
         for (const fragment of chunk.v) {
-          if (fragment.content) {
-            const fragmentType = fragment.type
-            const fragmentContent = fragment.content
-            
-            if (fragmentType === 'THINK') {
-              this.currentPath = 'thinking'
-              this.sendContent(fragmentContent, 'thinking', transStream, isSilentModel, isFoldModel, isSearchSilentModel)
-            } else if (fragmentType === 'ANSWER' || fragmentType === 'RESPONSE') {
-              this.currentPath = 'content'
-              this.sendContent(fragmentContent, 'content', transStream, isSilentModel, isFoldModel, isSearchSilentModel)
-            }
+          const kind = this.getFragmentKind(fragment?.type)
+          if (kind) {
+            this.currentPath = kind
+          }
+          if (fragment?.content && kind) {
+            this.sendContent(fragment.content, kind, transStream, isSilentModel, isFoldModel, isSearchSilentModel)
           }
         }
-      }
-    } else if (chunk.p === 'response' && Array.isArray(chunk.v)) {
-      const hasThinking = chunk.v.some((e: any) => 
-        e.p === 'response' && e.v && typeof e.v === 'object' && e.v.thinking_enabled === true
-      )
-      if (hasThinking) {
-        this.currentPath = 'thinking'
       }
     }
 
@@ -252,7 +234,7 @@ export class DeepSeekStreamHandler {
     }
 
     let content = ''
-    if (!handledFragments) {
+    if (!handledFragments && this.shouldExtractChunkText(chunk)) {
       content = this.extractTextFromValue(chunk.v)
     }
 
@@ -265,6 +247,18 @@ export class DeepSeekStreamHandler {
     }
 
     this.sendContent(content, effectivePath, transStream, isSilentModel, isFoldModel, isSearchSilentModel)
+  }
+
+  private getFragmentKind(fragmentType: unknown): FragmentKind {
+    if (fragmentType === 'THINK') return 'thinking'
+    if (fragmentType === 'ANSWER' || fragmentType === 'RESPONSE') return 'content'
+    return ''
+  }
+
+  private shouldExtractChunkText(chunk: StreamChunk): boolean {
+    if (!chunk.p) return true
+    if (chunk.p === 'response/fragments/-1/content') return true
+    return false
   }
 
   private sendContent(
@@ -390,7 +384,7 @@ export class DeepSeekStreamHandler {
     let accumulatedContent = ''
     let accumulatedThinkingContent = ''
     let messageId = ''
-    let currentPath = ''
+    let currentPath: FragmentKind = ''
     let accumulatedTokenUsage = 2
     const isThinkingModel = this.model.includes('think') || this.model.includes('r1') || !!this.reasoningEffort
     const isFoldModel = (this.model.includes('fold') || this.model.includes('search') || this.webSearchEnabled) && !isThinkingModel
@@ -420,49 +414,41 @@ export class DeepSeekStreamHandler {
             }
 
             if (parsed.v && typeof parsed.v === 'object' && parsed.v.response) {
-              const isThinkingNow = parsed.v.response.thinking_enabled
-              if (isThinkingNow !== undefined) {
-                currentPath = isThinkingNow ? 'thinking' : 'content'
-              }
-              
               const fragments = parsed.v.response.fragments
               if (Array.isArray(fragments) && fragments.length > 0) {
                 handledFragments = true
                 for (const fragment of fragments) {
-                  if (fragment.content) {
-                    let cleanedFragment = fragment.content.replace(/FINISHED/g, '')
-                    cleanedFragment = cleanedFragment.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
-                    if (fragment.type === 'THINK') {
+                  const kind = this.getFragmentKind(fragment?.type)
+                  if (kind) {
+                    currentPath = kind
+                  }
+                  if (fragment?.content && kind) {
+                    const cleanedFragment = this.normalizeContent(fragment.content, isSearchSilentModel)
+                    if (kind === 'thinking') {
                       accumulatedThinkingContent += cleanedFragment
-                    } else if (fragment.type === 'ANSWER' || fragment.type === 'RESPONSE') {
+                    } else {
                       accumulatedContent += cleanedFragment
                     }
                   }
                 }
               }
-            } else if (parsed.p === 'response/fragments') {
+            } else if (parsed.p === 'response/fragments' && parsed.o === 'APPEND') {
               if (Array.isArray(parsed.v)) {
                 handledFragments = true
                 for (const fragment of parsed.v) {
-                  if (fragment.content) {
-                    let cleanedFragment = fragment.content.replace(/FINISHED/g, '')
-                    cleanedFragment = cleanedFragment.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
-                    if (fragment.type === 'THINK') {
-                      currentPath = 'thinking'
+                  const kind = this.getFragmentKind(fragment?.type)
+                  if (kind) {
+                    currentPath = kind
+                  }
+                  if (fragment?.content && kind) {
+                    const cleanedFragment = this.normalizeContent(fragment.content, isSearchSilentModel)
+                    if (kind === 'thinking') {
                       accumulatedThinkingContent += cleanedFragment
-                    } else if (fragment.type === 'ANSWER' || fragment.type === 'RESPONSE') {
-                      currentPath = 'content'
+                    } else {
                       accumulatedContent += cleanedFragment
                     }
                   }
                 }
-              }
-            } else if (parsed.p === 'response' && Array.isArray(parsed.v)) {
-              const hasThinking = parsed.v.some((e: any) => 
-                e.p === 'response' && e.v && typeof e.v === 'object' && e.v.thinking_enabled === true
-              )
-              if (hasThinking) {
-                currentPath = 'thinking'
               }
             }
 
@@ -481,13 +467,10 @@ export class DeepSeekStreamHandler {
                 if (e.p === 'accumulated_token_usage' && typeof e.v === 'number') {
                   accumulatedTokenUsage = e.v
                 }
-                if (e.p === 'response' && e.v && typeof e.v === 'object' && e.v.thinking_enabled === true) {
-                  currentPath = 'thinking'
-                }
               })
             }
 
-            const extractedText = handledFragments ? '' : this.normalizeContent(this.extractTextFromValue(parsed.v), isSearchSilentModel)
+            const extractedText = handledFragments || !this.shouldExtractChunkText(parsed) ? '' : this.normalizeContent(this.extractTextFromValue(parsed.v), isSearchSilentModel)
             if (extractedText) {
               if (currentPath === 'thinking') {
                 accumulatedThinkingContent += extractedText
