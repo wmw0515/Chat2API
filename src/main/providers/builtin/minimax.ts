@@ -59,6 +59,14 @@ export const minimaxConfig: BuiltinProviderConfig = {
       helpText: 'Paste the complete Cookie string from MiniMax web DevTools if JWT-only send_msg returns HTTP 401.',
     },
     {
+      name: 'webUuid',
+      label: 'Web UUID (optional)',
+      type: 'text',
+      required: false,
+      placeholder: 'Paste uuid from successful MiniMax web send_msg URL (optional)',
+      helpText: 'uuid value from a successful MiniMax web send_msg URL. Required if generated uuid causes send_msg 401/503.',
+    },
+    {
       name: 'chatId',
       label: 'Chat ID (optional)',
       type: 'text',

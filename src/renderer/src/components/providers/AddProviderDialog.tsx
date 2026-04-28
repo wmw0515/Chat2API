@@ -350,6 +350,14 @@ export function AddProviderDialog({
           helpText: t('minimax.cookiesHelp'),
         },
         {
+          name: 'webUuid',
+          label: t('minimax.webUuid'),
+          type: 'text',
+          required: false,
+          placeholder: t('minimax.webUuidPlaceholder'),
+          helpText: t('minimax.webUuidHelp'),
+        },
+        {
           name: 'chatId',
           label: t('minimax.chatId'),
           type: 'text',
@@ -685,6 +693,11 @@ export function AddProviderDialog({
                   label: t('minimax.cookies'),
                   placeholder: t('minimax.cookiesPlaceholder'),
                   helpText: t('minimax.cookiesHelp'),
+                },
+                webUuid: {
+                  label: t('minimax.webUuid'),
+                  placeholder: t('minimax.webUuidPlaceholder'),
+                  helpText: t('minimax.webUuidHelp'),
                 },
                 chatId: {
                   label: t('minimax.chatId'),
