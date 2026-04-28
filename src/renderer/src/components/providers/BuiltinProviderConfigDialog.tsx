@@ -38,6 +38,7 @@ export function BuiltinProviderConfigDialog({
   onReset,
 }: BuiltinProviderConfigDialogProps) {
   const { t, i18n } = useTranslation()
+  const isMiniMaxProvider = provider?.id === 'minimax'
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [formState, setFormState] = useState<FormState>({
     apiEndpoint: '',
@@ -56,8 +57,46 @@ export function BuiltinProviderConfigDialog({
     headersText: JSON.stringify(provider?.headers || { 'Content-Type': 'application/json' }, null, 2),
     description: provider?.description || '',
     supportedModelsText: provider?.supportedModels?.join('\n') || '',
-    credentialFields: sortCredentialFields(normalizeCredentialFields(provider?.credentialFields || [])),
-  }), [provider])
+    credentialFields: sortCredentialFields(normalizeCredentialFields(provider?.credentialFields || [])).map((field) => {
+      if (!isMiniMaxProvider || !i18n.language.startsWith('zh')) {
+        return field
+      }
+
+      const minimaxFieldLocales: Partial<Record<string, Pick<CredentialField, 'label' | 'helpText'>>> = {
+        token: {
+          label: 'JWT Token',
+          helpText: '支持直接填写完整 JWT Token；也支持 realUserID+JWTToken 格式。若填写了 Real User ID，则优先使用 Real User ID 字段。',
+        },
+        realUserID: {
+          label: 'Real User ID（可选）',
+          helpText: '可选：填写成功 send_msg 请求 URL 中的 user_id 参数。若不填写，将尝试从 JWT 中解析。',
+        },
+        webUuid: {
+          label: 'Web UUID（可选）',
+          helpText: '可选：填写成功 send_msg 请求 URL 中的 uuid 参数。若不填写，将使用自动生成的 uuid。',
+        },
+        cookies: {
+          label: 'Cookies（可选）',
+          helpText: '当前 MiniMax send_msg 默认不发送 Cookie。仅在后续调试确认为必需时填写。',
+        },
+        chatId: {
+          label: 'Chat ID（可选）',
+          helpText: '当前 MiniMax send_msg 默认不需要 Chat ID。仅在后续调试确认为必需时填写。',
+        },
+      }
+
+      const localized = minimaxFieldLocales[field.name]
+      if (!localized) {
+        return field
+      }
+
+      return {
+        ...field,
+        label: localized.label ?? field.label,
+        helpText: localized.helpText ?? field.helpText,
+      }
+    }),
+  }), [i18n.language, isMiniMaxProvider, provider])
 
   useEffect(() => {
     setFormState(initialData)
@@ -84,11 +123,11 @@ export function BuiltinProviderConfigDialog({
 
     setErrors(nextErrors)
     if (formState.credentialFields.some((field) => !field.name.trim())) {
-      nextErrors.credentialFields = 'Credential field name is required.'
+      nextErrors.credentialFields = t('providers.credentialFieldNameRequired')
     }
     const names = formState.credentialFields.map((field) => field.name.trim())
     if (new Set(names).size !== names.length) {
-      nextErrors.credentialFields = 'Duplicate credential field names are not allowed.'
+      nextErrors.credentialFields = t('providers.credentialFieldNameDuplicate')
     }
     setErrors(nextErrors)
     return Object.keys(nextErrors).length === 0
@@ -211,44 +250,45 @@ export function BuiltinProviderConfigDialog({
 
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label>Credential Fields</Label>
-              <Button type="button" variant="outline" size="sm" onClick={addCredentialField}>Add Field</Button>
+              <Label>{t('providers.dynamicCredentialEditorTitle')}</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addCredentialField}>{t('providers.dynamicCredentialAddField')}</Button>
             </div>
             <div className="space-y-3">
               {formState.credentialFields.map((field, index) => (
                 <div key={`${field.name || 'new'}-${index}`} className="rounded border p-3 space-y-2">
                   <div className="grid grid-cols-2 gap-2">
-                    <Input placeholder="name" value={field.name} onChange={(e) => updateCredentialField(index, { name: e.target.value })} />
-                    <Input placeholder="label" value={field.label} onChange={(e) => updateCredentialField(index, { label: e.target.value })} />
+                    <Input placeholder={t('providers.dynamicCredentialFieldName')} value={field.name} onChange={(e) => updateCredentialField(index, { name: e.target.value })} />
+                    <Input placeholder={t('providers.dynamicCredentialFieldLabel')} value={field.label} onChange={(e) => updateCredentialField(index, { label: e.target.value })} />
                     <Select value={field.type} onValueChange={(value: CredentialField['type']) => updateCredentialField(index, { type: value })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder={t('providers.dynamicCredentialFieldType')} /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="text">text</SelectItem>
-                        <SelectItem value="password">password</SelectItem>
-                        <SelectItem value="textarea">textarea</SelectItem>
-                        <SelectItem value="number">number</SelectItem>
-                        <SelectItem value="select">select</SelectItem>
-                        <SelectItem value="json">json</SelectItem>
+                        <SelectItem value="text">{t('providers.dynamicCredentialType.text')}</SelectItem>
+                        <SelectItem value="password">{t('providers.dynamicCredentialType.password')}</SelectItem>
+                        <SelectItem value="textarea">{t('providers.dynamicCredentialType.textarea')}</SelectItem>
+                        <SelectItem value="number">{t('providers.dynamicCredentialType.number')}</SelectItem>
+                        <SelectItem value="select">{t('providers.dynamicCredentialType.select')}</SelectItem>
+                        <SelectItem value="json">{t('providers.dynamicCredentialType.json')}</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Input type="number" placeholder="order" value={field.order ?? 10000} onChange={(e) => updateCredentialField(index, { order: Number(e.target.value) || 10000 })} />
-                    <Input className="col-span-2" placeholder="helpText" value={field.helpText || ''} onChange={(e) => updateCredentialField(index, { helpText: e.target.value })} />
+                    <Input type="number" placeholder={t('providers.dynamicCredentialFieldOrder')} value={field.order ?? 10000} onChange={(e) => updateCredentialField(index, { order: Number(e.target.value) || 10000 })} />
+                    <Input className="col-span-2" placeholder={t('providers.dynamicCredentialFieldHelpText')} value={field.helpText || ''} onChange={(e) => updateCredentialField(index, { helpText: e.target.value })} />
+                    <p className="col-span-2 text-xs text-muted-foreground">{t('providers.dynamicCredentialFieldOrderHint')}</p>
                     <Select value={field.sanitize || 'none'} onValueChange={(value: CredentialField['sanitize']) => updateCredentialField(index, { sanitize: value })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder={t('providers.dynamicCredentialFieldSanitize')} /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">none</SelectItem>
-                        <SelectItem value="singleLine">singleLine</SelectItem>
-                        <SelectItem value="cookie">cookie</SelectItem>
-                        <SelectItem value="numeric">numeric</SelectItem>
-                        <SelectItem value="jwt">jwt</SelectItem>
+                        <SelectItem value="none">{t('providers.dynamicCredentialSanitize.none')}</SelectItem>
+                        <SelectItem value="singleLine">{t('providers.dynamicCredentialSanitize.singleLine')}</SelectItem>
+                        <SelectItem value="cookie">{t('providers.dynamicCredentialSanitize.cookie')}</SelectItem>
+                        <SelectItem value="numeric">{t('providers.dynamicCredentialSanitize.numeric')}</SelectItem>
+                        <SelectItem value="jwt">{t('providers.dynamicCredentialSanitize.jwt')}</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Input placeholder="placeholder" value={field.placeholder || ''} onChange={(e) => updateCredentialField(index, { placeholder: e.target.value })} />
+                    <Input placeholder={t('providers.dynamicCredentialFieldPlaceholder')} value={field.placeholder || ''} onChange={(e) => updateCredentialField(index, { placeholder: e.target.value })} />
                   </div>
                   <div className="flex items-center gap-4 text-xs">
-                    <label className="flex items-center gap-2"><Switch checked={field.required} onCheckedChange={(checked) => updateCredentialField(index, { required: Boolean(checked) })} />required</label>
-                    <label className="flex items-center gap-2"><Switch checked={field.secret ?? false} onCheckedChange={(checked) => updateCredentialField(index, { secret: Boolean(checked) })} />secret</label>
-                    <label className="flex items-center gap-2"><Switch checked={field.enabled !== false} onCheckedChange={(checked) => updateCredentialField(index, { enabled: Boolean(checked) })} />enabled</label>
+                    <label className="flex items-center gap-2"><Switch checked={field.required} onCheckedChange={(checked) => updateCredentialField(index, { required: Boolean(checked) })} />{t('providers.dynamicCredentialFieldRequired')}</label>
+                    <label className="flex items-center gap-2"><Switch checked={field.secret ?? false} onCheckedChange={(checked) => updateCredentialField(index, { secret: Boolean(checked) })} />{t('providers.dynamicCredentialFieldSecret')}</label>
+                    <label className="flex items-center gap-2"><Switch checked={field.enabled !== false} onCheckedChange={(checked) => updateCredentialField(index, { enabled: Boolean(checked) })} />{t('providers.dynamicCredentialFieldEnabled')}</label>
                     <Button type="button" variant="destructive" size="sm" onClick={() => {
                       const isBuiltin = Boolean(provider?.credentialFields?.some((builtinField) => builtinField.name === field.name))
                       if (isBuiltin) {
@@ -256,7 +296,7 @@ export function BuiltinProviderConfigDialog({
                         return
                       }
                       setFormState((prev) => ({ ...prev, credentialFields: prev.credentialFields.filter((_, i) => i !== index) }))
-                    }}>Delete/Disable</Button>
+                    }}>{t('providers.dynamicCredentialDeleteOrDisable')}</Button>
                   </div>
                 </div>
               ))}
