@@ -130,13 +130,22 @@ const deviceInfoMap = new Map<string, DeviceInfo>()
 const DEVICE_INFO_EXPIRES = 10800
 const MINIMAX_SEND_DEBUG = process.env.CHAT2API_MINIMAX_SEND_DEBUG === '1'
 
-function sanitizeCookieHeaderValue(rawValue: string): string {
-  return rawValue
+function sanitizeCookieHeaderValue(input: unknown): string {
+  if (typeof input !== 'string') {
+    return ''
+  }
+
+  return input
+    .replace(/^Cookie:\s*/i, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .replace(/\s*;\s*/g, '; ')
+    .replace(/\s+/g, ' ')
     .trim()
-    .replace(/[\r\n\t]+/g, '')
-    .replace(/[\x00-\x1F\x7F]/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim()
+}
+
+function hasInvalidCookieHeaderChars(value: string): boolean {
+  return /[\r\n\u0000-\u001F\u007F]/.test(value)
 }
 
 function normalizeMiniMaxChatId(rawValue: unknown): string | number | undefined {
@@ -170,7 +179,12 @@ function summarizeMiniMaxSendMsgRequest(
   userData: Record<string, any>,
   headers: Record<string, string>,
   data: any,
-  configuredChatId?: string | number
+  configuredChatId?: string | number,
+  cookieDiagnostics?: {
+    rawCookieLength: number
+    sanitizedCookieLength: number
+    cookieHadInvalidHeaderChars: boolean
+  }
 ): Record<string, any> {
   const queryKeys = Object.keys(userData).filter((key) => userData[key] !== undefined && userData[key] !== null)
   const cookieHeader = headers.Cookie || ''
@@ -180,10 +194,12 @@ function summarizeMiniMaxSendMsgRequest(
     method,
     path: uri,
     queryKeys,
+    rawCookieLength: cookieDiagnostics?.rawCookieLength ?? 0,
+    sanitizedCookieLength: cookieDiagnostics?.sanitizedCookieLength ?? cookieHeader.length,
+    cookieHadInvalidHeaderChars: cookieDiagnostics?.cookieHadInvalidHeaderChars ?? false,
     hasTokenInQuery: Boolean(tokenInQuery),
     tokenLength: tokenInQuery.length,
     hasCookieHeader: Boolean(cookieHeader),
-    cookieLength: cookieHeader.length,
     hasConfiguredChatId: configuredChatId !== undefined,
     hasTokenHeader: Boolean(headers.token),
     hasAuthorizationHeader: Boolean(headers.Authorization),
@@ -322,7 +338,7 @@ export class MiniMaxAdapter {
   private rawToken: string
   private jwtToken: string
   private realUserID: string
-  private cookies: string
+  private rawCookies: unknown
   private configuredChatId?: string | number
   private model: string
   private created: number
@@ -331,7 +347,7 @@ export class MiniMaxAdapter {
     this.provider = provider
     this.account = account
     this.rawToken = account.credentials.token || ''
-    this.cookies = sanitizeCookieHeaderValue(String(account.credentials.cookies || ''))
+    this.rawCookies = account.credentials.cookies
     this.configuredChatId = normalizeMiniMaxChatId(account.credentials.chatId)
     if (account.credentials.chatId !== undefined && this.configuredChatId === undefined) {
       console.warn('[MiniMax] Ignoring invalid chatId credential: expected numeric or numeric string')
@@ -485,13 +501,22 @@ export class MiniMaxAdapter {
       ...FAKE_HEADERS,
       'Content-Type': 'application/json',
     }
-
-    if (this.cookies) {
-      requestHeaders.Cookie = this.cookies
+    const rawCookie = typeof this.rawCookies === 'string' ? this.rawCookies : ''
+    const sanitizedCookie = sanitizeCookieHeaderValue(rawCookie)
+    const cookieHadInvalidHeaderChars = hasInvalidCookieHeaderChars(rawCookie)
+    if (sanitizedCookie && !hasInvalidCookieHeaderChars(sanitizedCookie)) {
+      requestHeaders.Cookie = sanitizedCookie
     }
 
     if (MINIMAX_SEND_DEBUG) {
-      console.log('[MiniMax][send_msg][request]', summarizeMiniMaxSendMsgRequest(method, uri, userData, requestHeaders, data, this.configuredChatId))
+      console.log(
+        '[MiniMax][send_msg][request]',
+        summarizeMiniMaxSendMsgRequest(method, uri, userData, requestHeaders, data, this.configuredChatId, {
+          rawCookieLength: rawCookie.length,
+          sanitizedCookieLength: sanitizedCookie.length,
+          cookieHadInvalidHeaderChars,
+        })
+      )
     }
 
     const response = await axios.request({
