@@ -120,7 +120,7 @@ export class CustomProviderManager {
         errors.push(`Label for credential field "${field.name}" cannot be empty`)
       }
       
-      const validTypes = ['text', 'password', 'textarea']
+      const validTypes = ['text', 'password', 'textarea', 'number', 'select', 'json']
       if (!validTypes.includes(field.type)) {
         errors.push(`Invalid type for credential field "${field.name}"`)
       }

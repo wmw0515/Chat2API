@@ -14,9 +14,11 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Check, Plus, ArrowRight, Loader2, ExternalLink, AlertCircle, CheckCircle2, ArrowLeft, Info, Eye, EyeOff, Copy } from 'lucide-react'
+import { Check, Plus, ArrowRight, Loader2, ExternalLink, AlertCircle, CheckCircle2, ArrowLeft, Info } from 'lucide-react'
 import type { BuiltinProviderConfig, ProviderVendor } from '@/types/electron'
 import { cn } from '@/lib/utils'
+import CredentialFieldsRenderer from './CredentialFieldsRenderer'
+import { normalizeCredentialFields, sortCredentialFields } from '../../../../shared/credentialFields'
 import deepseekIcon from '@/assets/providers/deepseek.svg'
 import glmIcon from '@/assets/providers/glm.svg'
 import kimiIcon from '@/assets/providers/kimi.svg'
@@ -184,28 +186,9 @@ export function AddProviderDialog({
     }
   }>({})
   const [oauthStatus, setOAuthStatus] = useState<string>('')
-  const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({})
-  const [copiedFields, setCopiedFields] = useState<Record<string, boolean>>({})
 
-  const toggleFieldVisibility = (fieldName: string) => {
-    setVisibleFields(prev => ({
-      ...prev,
-      [fieldName]: !prev[fieldName]
-    }))
-  }
 
-  const copyToClipboard = async (fieldName: string, value: string) => {
-    if (!value) return
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopiedFields(prev => ({ ...prev, [fieldName]: true }))
-      setTimeout(() => {
-        setCopiedFields(prev => ({ ...prev, [fieldName]: false }))
-      }, 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
-    }
-  }
+
 
   const DEFAULT_BUILTIN_PROVIDERS: BuiltinProviderConfig[] = [
     {
@@ -478,8 +461,6 @@ export function AddProviderDialog({
       setProviderTab('builtin')
       setIsOAuthLoading(false)
       setOAuthStatus('')
-      setVisibleFields({})
-      setCopiedFields({})
     }
   }, [open])
 
@@ -494,7 +475,7 @@ export function AddProviderDialog({
   const handleValidate = async () => {
     if (!selectedProviderData || !onValidateToken) return
 
-    const credentialFields = selectedProviderData.credentialFields || []
+    const credentialFields = sortCredentialFields(normalizeCredentialFields(selectedProviderData.credentialFields || [])).filter((field) => field.enabled !== false)
     const requiredFields = credentialFields.filter(f => f.required)
     const missingFields = requiredFields.filter(f => !credentials[f.name])
     
@@ -525,7 +506,7 @@ export function AddProviderDialog({
   const handleSubmit = async () => {
     if (!selectedProviderData) return
 
-    const credentialFields = selectedProviderData.credentialFields || []
+    const credentialFields = sortCredentialFields(normalizeCredentialFields(selectedProviderData.credentialFields || [])).filter((field) => field.enabled !== false)
     const requiredFields = credentialFields.filter(f => f.required)
     const missingFields = requiredFields.filter(f => !credentials[f.name])
     
@@ -649,231 +630,13 @@ export function AddProviderDialog({
 
   const renderCredentialFields = () => {
     if (!selectedProviderData) return null
-
-    const credentialFields = selectedProviderData.credentialFields || []
-
+    const credentialFields = sortCredentialFields(normalizeCredentialFields(selectedProviderData.credentialFields || [])).filter((field) => field.enabled !== false)
     return (
-      <div className="space-y-4">
-        {credentialFields.map((field) => {
-          const getFieldTranslation = () => {
-            const translations: Record<string, Record<string, { label: string; placeholder: string; helpText: string }>> = {
-              deepseek: {
-                token: {
-                  label: t('deepseek.userToken'),
-                  placeholder: t('deepseek.userTokenPlaceholder'),
-                  helpText: t('deepseek.userTokenHelp'),
-                },
-              },
-              glm: {
-                refresh_token: {
-                  label: t('glm.refreshToken'),
-                  placeholder: t('glm.refreshTokenPlaceholder'),
-                  helpText: t('glm.refreshTokenHelp'),
-                },
-              },
-              kimi: {
-                token: {
-                  label: t('kimi.accessToken'),
-                  placeholder: t('kimi.accessTokenPlaceholder'),
-                  helpText: t('kimi.accessTokenHelp'),
-                },
-              },
-              minimax: {
-                token: {
-                  label: t('minimax.token'),
-                  placeholder: t('minimax.tokenPlaceholder'),
-                  helpText: t('minimax.tokenHelp'),
-                },
-                realUserID: {
-                  label: t('minimax.realUserID'),
-                  placeholder: t('minimax.realUserIDPlaceholder'),
-                  helpText: t('minimax.realUserIDHelp'),
-                },
-                cookies: {
-                  label: t('minimax.cookies'),
-                  placeholder: t('minimax.cookiesPlaceholder'),
-                  helpText: t('minimax.cookiesHelp'),
-                },
-                webUuid: {
-                  label: t('minimax.webUuid'),
-                  placeholder: t('minimax.webUuidPlaceholder'),
-                  helpText: t('minimax.webUuidHelp'),
-                },
-                chatId: {
-                  label: t('minimax.chatId'),
-                  placeholder: t('minimax.chatIdPlaceholder'),
-                  helpText: t('minimax.chatIdHelp'),
-                },
-              },
-              qwen: {
-                ticket: {
-                  label: t('qwen.ssoTicket'),
-                  placeholder: t('qwen.ssoTicketPlaceholder'),
-                  helpText: t('qwen.ssoTicketHelp'),
-                },
-              },
-              'qwen-ai': {
-                token: {
-                  label: t('qwen-ai.token'),
-                  placeholder: t('qwen-ai.tokenPlaceholder'),
-                  helpText: t('qwen-ai.tokenHelp'),
-                },
-                cookies: {
-                  label: t('qwen-ai.cookies'),
-                  placeholder: t('qwen-ai.cookiesPlaceholder'),
-                  helpText: t('qwen-ai.cookiesHelp'),
-                },
-              },
-              zai: {
-                token: {
-                  label: t('zai.token'),
-                  placeholder: t('zai.tokenPlaceholder'),
-                  helpText: t('zai.tokenHelp'),
-                },
-              },
-              mimo: {
-                service_token: {
-                  label: t('mimo.serviceToken'),
-                  placeholder: t('mimo.serviceTokenPlaceholder'),
-                  helpText: t('mimo.serviceTokenHelp'),
-                },
-                user_id: {
-                  label: t('mimo.userId'),
-                  placeholder: t('mimo.userIdPlaceholder'),
-                  helpText: t('mimo.userIdHelp'),
-                },
-                ph_token: {
-                  label: t('mimo.phToken'),
-                  placeholder: t('mimo.phTokenPlaceholder'),
-                  helpText: t('mimo.phTokenHelp'),
-                },
-              },
-              perplexity: {
-                sessionToken: {
-                  label: t('perplexity.sessionToken'),
-                  placeholder: t('perplexity.sessionTokenPlaceholder'),
-                  helpText: t('perplexity.sessionTokenHelp'),
-                },
-              },
-            }
-
-            const providerTranslations = translations[selectedProviderData.id]
-            if (providerTranslations && providerTranslations[field.name]) {
-              return providerTranslations[field.name]
-            }
-
-            return { label: field.label, placeholder: field.placeholder, helpText: field.helpText }
-          }
-
-          const translated = getFieldTranslation()
-          const isPasswordField = field.type === 'password'
-          const isVisible = visibleFields[field.name]
-          const isCopied = copiedFields[field.name]
-          const fieldValue = credentials[field.name] || ''
-
-          return (
-            <div key={field.name} className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Label htmlFor={field.name}>{translated.label}</Label>
-                {field.required && (
-                  <Badge variant="outline" className="text-xs">{t('providers.required')}</Badge>
-                )}
-              </div>
-              {field.type === 'textarea' ? (
-                <div className="relative">
-                  <textarea
-                    id={field.name}
-                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 pr-20"
-                    placeholder={translated.placeholder}
-                    value={fieldValue}
-                    onChange={(e) => handleCredentialChange(field.name, e.target.value)}
-                  />
-                  <div className="absolute right-1 top-1 flex gap-0.5">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      onClick={() => copyToClipboard(field.name, fieldValue)}
-                      disabled={!fieldValue}
-                    >
-                      {isCopied ? (
-                        <Check className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <Copy className="h-4 w-4 text-muted-foreground" />
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      onClick={() => toggleFieldVisibility(field.name)}
-                    >
-                      {isVisible ? (
-                        <EyeOff className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <Eye className="h-4 w-4 text-muted-foreground" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              ) : isPasswordField ? (
-                <div className="relative">
-                  <Input
-                    id={field.name}
-                    type={isVisible ? 'text' : 'password'}
-                    placeholder={translated.placeholder}
-                    value={fieldValue}
-                    onChange={(e) => handleCredentialChange(field.name, e.target.value)}
-                    className="pr-20"
-                  />
-                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      onClick={() => copyToClipboard(field.name, fieldValue)}
-                      disabled={!fieldValue}
-                    >
-                      {isCopied ? (
-                        <Check className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <Copy className="h-4 w-4 text-muted-foreground" />
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      onClick={() => toggleFieldVisibility(field.name)}
-                    >
-                      {isVisible ? (
-                        <EyeOff className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <Eye className="h-4 w-4 text-muted-foreground" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <Input
-                  id={field.name}
-                  type={field.type}
-                  placeholder={translated.placeholder}
-                  value={fieldValue}
-                  onChange={(e) => handleCredentialChange(field.name, e.target.value)}
-                />
-              )}
-              {translated.helpText && (
-                <p className="text-xs text-muted-foreground">{translated.helpText}</p>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      <CredentialFieldsRenderer
+        fields={credentialFields}
+        credentials={credentials}
+        onChange={handleCredentialChange}
+      />
     )
   }
 

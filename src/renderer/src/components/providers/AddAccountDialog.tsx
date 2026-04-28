@@ -24,13 +24,11 @@ import {
   User, 
   AlertCircle,
   Loader2,
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  Copy,
-  Check
+  CheckCircle2
 } from 'lucide-react'
 import type { Provider, CredentialField, Account, BuiltinProviderConfig, ProviderVendor } from '@/types/electron'
+import CredentialFieldsRenderer from './CredentialFieldsRenderer'
+import { normalizeCredentialFields, sortCredentialFields } from '../../../../shared/credentialFields'
 
 /**
  * Map OAuth credentials to provider credential field names
@@ -170,7 +168,7 @@ export function AddAccountDialog({
 
   const isEditing = !!editingAccount
   const builtinProvider = provider as BuiltinProviderConfig | null
-  const credentialFields: CredentialField[] = builtinProvider?.credentialFields || getDefaultCredentialFields(provider?.authType, t)
+  const credentialFields: CredentialField[] = sortCredentialFields(normalizeCredentialFields(builtinProvider?.credentialFields || getDefaultCredentialFields(provider?.authType, t))).filter((field) => field.enabled !== false)
   const supportsOAuth = provider && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity'].includes(provider.id)
 
   useEffect(() => {
@@ -403,12 +401,10 @@ export function AddAccountDialog({
                 </TabsList>
 
                 <TabsContent value="manual" className="mt-4">
-                  <CredentialFieldsForm
+                  <CredentialFieldsRenderer
                     fields={credentialFields}
                     credentials={credentials}
                     onChange={handleCredentialChange}
-                    t={t}
-                    providerId={provider?.id}
                   />
                 </TabsContent>
 
@@ -449,12 +445,10 @@ export function AddAccountDialog({
             )}
 
             {(!supportsOAuth || isEditing) && (
-              <CredentialFieldsForm
+              <CredentialFieldsRenderer
                 fields={credentialFields}
                 credentials={credentials}
                 onChange={handleCredentialChange}
-                t={t}
-                providerId={provider?.id}
               />
             )}
 
@@ -522,265 +516,6 @@ export function AddAccountDialog({
         </DialogContent>
       </Dialog>
     </>
-  )
-}
-
-interface CredentialFieldsFormProps {
-  fields: CredentialField[]
-  credentials: Record<string, string>
-  onChange: (fieldName: string, value: string) => void
-  t: (key: string) => string
-  providerId?: string
-}
-
-function CredentialFieldsForm({ fields, credentials, onChange, t, providerId }: CredentialFieldsFormProps) {
-  const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({})
-  const [copiedFields, setCopiedFields] = useState<Record<string, boolean>>({})
-
-  const toggleFieldVisibility = (fieldName: string) => {
-    setVisibleFields(prev => ({
-      ...prev,
-      [fieldName]: !prev[fieldName]
-    }))
-  }
-
-  const copyToClipboard = async (fieldName: string, value: string) => {
-    if (!value) return
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopiedFields(prev => ({ ...prev, [fieldName]: true }))
-      setTimeout(() => {
-        setCopiedFields(prev => ({ ...prev, [fieldName]: false }))
-      }, 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
-    }
-  }
-
-  const getFieldTranslation = (field: CredentialField) => {
-    if (!providerId) return { label: field.label, placeholder: field.placeholder, helpText: field.helpText }
-
-    const translations: Record<string, Record<string, { label: string; placeholder: string; helpText: string }>> = {
-      deepseek: {
-        token: {
-          label: t('deepseek.userToken'),
-          placeholder: t('deepseek.userTokenPlaceholder'),
-          helpText: t('deepseek.userTokenHelp'),
-        },
-      },
-      glm: {
-        refresh_token: {
-          label: t('glm.refreshToken'),
-          placeholder: t('glm.refreshTokenPlaceholder'),
-          helpText: t('glm.refreshTokenHelp'),
-        },
-      },
-      kimi: {
-        token: {
-          label: t('kimi.accessToken'),
-          placeholder: t('kimi.accessTokenPlaceholder'),
-          helpText: t('kimi.accessTokenHelp'),
-        },
-      },
-      minimax: {
-        token: {
-          label: t('minimax.token'),
-          placeholder: t('minimax.tokenPlaceholder'),
-          helpText: t('minimax.tokenHelp'),
-        },
-        realUserID: {
-          label: t('minimax.realUserID'),
-          placeholder: t('minimax.realUserIDPlaceholder'),
-          helpText: t('minimax.realUserIDHelp'),
-        },
-        cookies: {
-          label: t('minimax.cookies'),
-          placeholder: t('minimax.cookiesPlaceholder'),
-          helpText: t('minimax.cookiesHelp'),
-        },
-        webUuid: {
-          label: t('minimax.webUuid'),
-          placeholder: t('minimax.webUuidPlaceholder'),
-          helpText: t('minimax.webUuidHelp'),
-        },
-        chatId: {
-          label: t('minimax.chatId'),
-          placeholder: t('minimax.chatIdPlaceholder'),
-          helpText: t('minimax.chatIdHelp'),
-        },
-      },
-      qwen: {
-        ticket: {
-          label: t('qwen.ssoTicket'),
-          placeholder: t('qwen.ssoTicketPlaceholder'),
-          helpText: t('qwen.ssoTicketHelp'),
-        },
-      },
-      'qwen-ai': {
-        token: {
-          label: t('qwen-ai.token'),
-          placeholder: t('qwen-ai.tokenPlaceholder'),
-          helpText: t('qwen-ai.tokenHelp'),
-        },
-        cookies: {
-          label: t('qwen-ai.cookies'),
-          placeholder: t('qwen-ai.cookiesPlaceholder'),
-          helpText: t('qwen-ai.cookiesHelp'),
-        },
-      },
-      zai: {
-        token: {
-          label: t('zai.token'),
-          placeholder: t('zai.tokenPlaceholder'),
-          helpText: t('zai.tokenHelp'),
-        },
-      },
-      mimo: {
-        service_token: {
-          label: t('mimo.serviceToken'),
-          placeholder: t('mimo.serviceTokenPlaceholder'),
-          helpText: t('mimo.serviceTokenHelp'),
-        },
-        user_id: {
-          label: t('mimo.userId'),
-          placeholder: t('mimo.userIdPlaceholder'),
-          helpText: t('mimo.userIdHelp'),
-        },
-        ph_token: {
-          label: t('mimo.phToken'),
-          placeholder: t('mimo.phTokenPlaceholder'),
-          helpText: t('mimo.phTokenHelp'),
-        },
-      },
-      perplexity: {
-        sessionToken: {
-          label: t('perplexity.sessionToken'),
-          placeholder: t('perplexity.sessionTokenPlaceholder'),
-          helpText: t('perplexity.sessionTokenHelp'),
-        },
-      },
-    }
-
-    const providerTranslations = translations[providerId]
-    if (providerTranslations && providerTranslations[field.name]) {
-      return providerTranslations[field.name]
-    }
-
-    return { label: field.label, placeholder: field.placeholder, helpText: field.helpText }
-  }
-
-  return (
-    <div className="space-y-4">
-      {fields.map((field) => {
-        const translated = getFieldTranslation(field)
-        const isPasswordField = field.type === 'password'
-        const isVisible = visibleFields[field.name]
-        const isCopied = copiedFields[field.name]
-        const fieldValue = credentials[field.name] || ''
-        
-        return (
-          <div key={field.name} className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Label htmlFor={field.name}>{translated.label}</Label>
-              {field.required && (
-                <Badge variant="outline" className="text-xs">{t('providers.required')}</Badge>
-              )}
-            </div>
-            {field.type === 'textarea' ? (
-              <div className="relative">
-                <textarea
-                  id={field.name}
-                  className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 pr-20"
-                  placeholder={translated.placeholder}
-                  value={fieldValue}
-                  onChange={(e) => onChange(field.name, e.target.value)}
-                />
-                <div className="absolute right-1 top-1 flex gap-0.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    onClick={() => copyToClipboard(field.name, fieldValue)}
-                    disabled={!fieldValue}
-                  >
-                    {isCopied ? (
-                      <Check className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <Copy className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    onClick={() => toggleFieldVisibility(field.name)}
-                  >
-                    {isVisible ? (
-                      <EyeOff className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <Eye className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            ) : isPasswordField ? (
-              <div className="relative">
-                <Input
-                  id={field.name}
-                  type={isVisible ? 'text' : 'password'}
-                  placeholder={translated.placeholder}
-                  value={fieldValue}
-                  onChange={(e) => onChange(field.name, e.target.value)}
-                  className="pr-20"
-                />
-                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    onClick={() => copyToClipboard(field.name, fieldValue)}
-                    disabled={!fieldValue}
-                  >
-                    {isCopied ? (
-                      <Check className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <Copy className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    onClick={() => toggleFieldVisibility(field.name)}
-                  >
-                    {isVisible ? (
-                      <EyeOff className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <Eye className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <Input
-                id={field.name}
-                type={field.type}
-                placeholder={translated.placeholder}
-                value={fieldValue}
-                onChange={(e) => onChange(field.name, e.target.value)}
-              />
-            )}
-            {translated.helpText && (
-              <p className="text-xs text-muted-foreground">{translated.helpText}</p>
-            )}
-          </div>
-        )
-      })}
-    </div>
   )
 }
 

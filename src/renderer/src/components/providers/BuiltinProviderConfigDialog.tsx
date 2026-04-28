@@ -6,7 +6,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import type { Provider, ProviderConfigOverride } from '@/types/electron'
+import { Switch } from '@/components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import type { CredentialField, Provider, ProviderConfigOverride } from '@/types/electron'
+import { normalizeCredentialFields, sortCredentialFields } from '../../../../shared/credentialFields'
 
 interface BuiltinProviderConfigDialogProps {
   open: boolean
@@ -23,6 +26,7 @@ interface FormState {
   headersText: string
   description: string
   supportedModelsText: string
+  credentialFields: CredentialField[]
 }
 
 export function BuiltinProviderConfigDialog({
@@ -41,6 +45,7 @@ export function BuiltinProviderConfigDialog({
     headersText: '{"Content-Type":"application/json"}',
     description: '',
     supportedModelsText: '',
+    credentialFields: [],
   })
 
   const canEditSupportedModels = Boolean(provider?.supportedModels?.length)
@@ -51,6 +56,7 @@ export function BuiltinProviderConfigDialog({
     headersText: JSON.stringify(provider?.headers || { 'Content-Type': 'application/json' }, null, 2),
     description: provider?.description || '',
     supportedModelsText: provider?.supportedModels?.join('\n') || '',
+    credentialFields: sortCredentialFields(normalizeCredentialFields(provider?.credentialFields || [])),
   }), [provider])
 
   useEffect(() => {
@@ -77,6 +83,14 @@ export function BuiltinProviderConfigDialog({
     }
 
     setErrors(nextErrors)
+    if (formState.credentialFields.some((field) => !field.name.trim())) {
+      nextErrors.credentialFields = 'Credential field name is required.'
+    }
+    const names = formState.credentialFields.map((field) => field.name.trim())
+    if (new Set(names).size !== names.length) {
+      nextErrors.credentialFields = 'Duplicate credential field names are not allowed.'
+    }
+    setErrors(nextErrors)
     return Object.keys(nextErrors).length === 0
   }
 
@@ -97,8 +111,36 @@ export function BuiltinProviderConfigDialog({
         .map((m) => m.trim())
         .filter(Boolean)
     }
+    payload.credentialFields = sortCredentialFields(normalizeCredentialFields(formState.credentialFields))
 
     onSubmit(payload)
+  }
+
+  const updateCredentialField = (index: number, updates: Partial<CredentialField>) => {
+    setFormState((prev) => {
+      const next = [...prev.credentialFields]
+      next[index] = { ...next[index], ...updates }
+      return { ...prev, credentialFields: next }
+    })
+  }
+
+  const addCredentialField = () => {
+    setFormState((prev) => ({
+      ...prev,
+      credentialFields: [
+        ...prev.credentialFields,
+        {
+          name: '',
+          label: '',
+          type: 'text',
+          required: false,
+          secret: false,
+          order: 10000,
+          sanitize: 'none',
+          enabled: true,
+        },
+      ],
+    }))
   }
 
   const warningText = i18n.language.startsWith('zh')
@@ -166,6 +208,61 @@ export function BuiltinProviderConfigDialog({
               />
             </div>
           )}
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Credential Fields</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addCredentialField}>Add Field</Button>
+            </div>
+            <div className="space-y-3">
+              {formState.credentialFields.map((field, index) => (
+                <div key={`${field.name || 'new'}-${index}`} className="rounded border p-3 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input placeholder="name" value={field.name} onChange={(e) => updateCredentialField(index, { name: e.target.value })} />
+                    <Input placeholder="label" value={field.label} onChange={(e) => updateCredentialField(index, { label: e.target.value })} />
+                    <Select value={field.type} onValueChange={(value: CredentialField['type']) => updateCredentialField(index, { type: value })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="text">text</SelectItem>
+                        <SelectItem value="password">password</SelectItem>
+                        <SelectItem value="textarea">textarea</SelectItem>
+                        <SelectItem value="number">number</SelectItem>
+                        <SelectItem value="select">select</SelectItem>
+                        <SelectItem value="json">json</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input type="number" placeholder="order" value={field.order ?? 10000} onChange={(e) => updateCredentialField(index, { order: Number(e.target.value) || 10000 })} />
+                    <Input className="col-span-2" placeholder="helpText" value={field.helpText || ''} onChange={(e) => updateCredentialField(index, { helpText: e.target.value })} />
+                    <Select value={field.sanitize || 'none'} onValueChange={(value: CredentialField['sanitize']) => updateCredentialField(index, { sanitize: value })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">none</SelectItem>
+                        <SelectItem value="singleLine">singleLine</SelectItem>
+                        <SelectItem value="cookie">cookie</SelectItem>
+                        <SelectItem value="numeric">numeric</SelectItem>
+                        <SelectItem value="jwt">jwt</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input placeholder="placeholder" value={field.placeholder || ''} onChange={(e) => updateCredentialField(index, { placeholder: e.target.value })} />
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    <label className="flex items-center gap-2"><Switch checked={field.required} onCheckedChange={(checked) => updateCredentialField(index, { required: Boolean(checked) })} />required</label>
+                    <label className="flex items-center gap-2"><Switch checked={field.secret ?? false} onCheckedChange={(checked) => updateCredentialField(index, { secret: Boolean(checked) })} />secret</label>
+                    <label className="flex items-center gap-2"><Switch checked={field.enabled !== false} onCheckedChange={(checked) => updateCredentialField(index, { enabled: Boolean(checked) })} />enabled</label>
+                    <Button type="button" variant="destructive" size="sm" onClick={() => {
+                      const isBuiltin = Boolean(provider?.credentialFields?.some((builtinField) => builtinField.name === field.name))
+                      if (isBuiltin) {
+                        updateCredentialField(index, { enabled: false })
+                        return
+                      }
+                      setFormState((prev) => ({ ...prev, credentialFields: prev.credentialFields.filter((_, i) => i !== index) }))
+                    }}>Delete/Disable</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {errors.credentialFields && <p className="text-destructive text-xs">{errors.credentialFields}</p>}
+          </div>
         </div>
 
         <DialogFooter>

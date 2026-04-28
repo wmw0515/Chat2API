@@ -49,13 +49,23 @@ export interface CredentialField {
   /** Field label (display name) */
   label: string
   /** Field type */
-  type: 'text' | 'password' | 'textarea'
+  type: 'text' | 'password' | 'textarea' | 'number' | 'select' | 'json'
   /** Whether required */
   required: boolean
+  /** Whether field should be treated as secret */
+  secret?: boolean
+  /** Render order (asc) */
+  order?: number
   /** Placeholder text */
   placeholder?: string
   /** Help text */
   helpText?: string
+  /** Sanitizer mode */
+  sanitize?: 'none' | 'singleLine' | 'cookie' | 'numeric' | 'jwt'
+  /** Whether field is enabled */
+  enabled?: boolean
+  /** Options for select field */
+  options?: Array<{ label: string; value: string }>
 }
 
 /**

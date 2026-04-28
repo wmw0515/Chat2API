@@ -43,6 +43,7 @@ import {
 import { getBuiltinProvider } from '../providers/builtin'
 import { BUILTIN_PROMPTS } from '../data/builtin-prompts'
 import { IpcChannels } from '../ipc/channels'
+import { normalizeCredentialFields, sortCredentialFields } from '../../shared/credentialFields'
 
 // Dynamically import electron-store (ESM module)
 let Store: any = null
@@ -260,7 +261,7 @@ class StoreManager {
             modelMappings: hasUserOverrides ? p.modelMappings : builtinConfig.modelMappings,
             headers: builtinConfig.headers,
             description: builtinConfig.description,
-            credentialFields: builtinConfig.credentialFields,
+            credentialFields: this.mergeBuiltinCredentialFields(p.credentialFields || [], builtinConfig.credentialFields || []),
           }
         }
       }
@@ -296,7 +297,7 @@ class StoreManager {
           description: builtinConfig.description,
           supportedModels: builtinConfig.supportedModels,
           modelMappings: builtinConfig.modelMappings,
-          credentialFields: builtinConfig.credentialFields,
+          credentialFields: sortCredentialFields(normalizeCredentialFields(builtinConfig.credentialFields || [])),
         }
         providers.push(newProvider)
         this.store!.set('providers', providers)
@@ -492,19 +493,45 @@ class StoreManager {
     if (!builtin) {
       throw new Error('Only built-in providers support overrides')
     }
-    const allowedCredentialNames = new Set((builtin.credentialFields || []).map(field => field.name))
     if (override.credentialFields) {
-      for (const field of override.credentialFields) {
-        if (!allowedCredentialNames.has(field.name)) {
-          throw new Error(`Credential field "${field.name}" is not supported for built-in provider`)
-        }
+      const normalized = sortCredentialFields(normalizeCredentialFields(override.credentialFields))
+      const names = normalized.map((field) => field.name)
+      if (new Set(names).size !== names.length) {
+        throw new Error('Duplicate credential field names are not allowed')
       }
+      override = { ...override, credentialFields: normalized }
     }
 
     const overrides = this.getProviderConfigOverrides()
     overrides[providerId] = { ...overrides[providerId], ...override }
     this.store!.set('providerConfigOverrides', overrides)
     return overrides[providerId]
+  }
+
+  private mergeBuiltinCredentialFields(existingFields: Provider['credentialFields'], builtinFields: Provider['credentialFields']): Provider['credentialFields'] {
+    const normalizedBuiltin = sortCredentialFields(normalizeCredentialFields(builtinFields || []))
+    const normalizedExisting = sortCredentialFields(normalizeCredentialFields(existingFields || []))
+    const merged = new Map<string, Provider['credentialFields'][number]>()
+
+    for (const field of normalizedBuiltin) {
+      merged.set(field.name, { ...field })
+    }
+    for (const field of normalizedExisting) {
+      if (!field.name) continue
+      if (!merged.has(field.name)) {
+        merged.set(field.name, field)
+        continue
+      }
+      const builtinField = merged.get(field.name)!
+      merged.set(field.name, {
+        ...builtinField,
+        enabled: field.enabled ?? builtinField.enabled,
+        placeholder: field.placeholder || builtinField.placeholder,
+        helpText: field.helpText || builtinField.helpText,
+      })
+    }
+
+    return sortCredentialFields(Array.from(merged.values()))
   }
 
   deleteProviderConfigOverride(providerId: string): void {

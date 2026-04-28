@@ -289,6 +289,7 @@ export class ProxyServer {
     const toDashboardExport = (includeCredentials: boolean): DashboardExportPayload => {
       const providers = ProviderManager.getAll()
       const accounts = AccountManager.getAll(includeCredentials)
+      const providerById = new Map(providers.map((provider) => [provider.id, provider]))
 
       return {
         version: rootInfoResponse.version,
@@ -297,7 +298,19 @@ export class ProxyServer {
         providers,
         accounts: accounts.map((account) => {
           if (includeCredentials) {
-            return account
+            const provider = providerById.get(account.providerId)
+            const secretFieldNames = new Set(
+              (provider?.credentialFields || [])
+                .filter((field) => field.secret)
+                .map((field) => field.name),
+            )
+            const sanitizedCredentials = Object.fromEntries(
+              Object.entries(account.credentials || {}).filter(([key]) => !secretFieldNames.has(key)),
+            )
+            return {
+              ...account,
+              credentials: sanitizedCredentials,
+            }
           }
           return stripAccountCredentials(account)
         }),
