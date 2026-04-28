@@ -12,24 +12,30 @@ import { Account, Provider } from '../store/types'
 import { storeManager } from '../store/store'
 
 const DEEPSEEK_API_BASE = 'https://chat.deepseek.com/api'
+const DEEPSEEK_WEB_BASE = 'https://chat.deepseek.com'
 
 const FAKE_HEADERS = {
   Accept: '*/*',
   'Accept-Encoding': 'gzip, deflate, br, zstd',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-  Origin: 'https://chat.deepseek.com',
-  Referer: 'https://chat.deepseek.com/',
-  'Sec-Ch-Ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+  Origin: DEEPSEEK_WEB_BASE,
+  Referer: `${DEEPSEEK_WEB_BASE}/`,
+  'Sec-Ch-Ua': '"Google Chrome";v="147", "Chromium";v="147", "Not_A Brand";v="24"',
   'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"macOS"',
+  'Sec-Ch-Ua-Platform': '"Windows"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
   'X-App-Version': '20241129.1',
-  'X-Client-Locale': 'zh-CN',
+  'X-Client-Locale': 'zh_CN',
   'X-Client-Platform': 'web',
-  'X-Client-Version': '1.6.1',
+  'X-Client-Timezone-Offset': '28800',
+  'X-Client-Version': '2.0.0',
+}
+
+function buildDeepSeekSessionReferer(sessionId: string): string {
+  return `${DEEPSEEK_WEB_BASE}/a/chat/s/${sessionId}`
 }
 
 interface TokenInfo {
@@ -247,7 +253,7 @@ export class DeepSeekAdapter {
     }
   }
 
-  private async getChallenge(targetPath: string): Promise<ChallengeResponse> {
+  private async getChallenge(targetPath: string, sessionId?: string): Promise<ChallengeResponse> {
     const token = await this.acquireToken()
     const result = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/create_pow_challenge`,
@@ -256,6 +262,7 @@ export class DeepSeekAdapter {
         headers: {
           Authorization: `Bearer ${token}`,
           ...FAKE_HEADERS,
+          ...(sessionId ? { Referer: buildDeepSeekSessionReferer(sessionId) } : {}),
         },
         timeout: 15000,
         validateStatus: () => true,
@@ -391,7 +398,7 @@ ${message.content || ''}
     const sessionId = await this.createSession()
     console.log('[DeepSeek] Created new session:', sessionId)
     
-    const challenge = await this.getChallenge('/api/v0/chat/completion')
+    const challenge = await this.getChallenge('/api/v0/chat/completion', sessionId)
     const challengeAnswer = await this.calculateChallengeAnswer(challenge)
 
     // Clone messages to avoid modifying original request
@@ -429,6 +436,7 @@ ${message.content || ''}
         headers: {
           Authorization: `Bearer ${token}`,
           ...FAKE_HEADERS,
+          Referer: buildDeepSeekSessionReferer(sessionId),
           Cookie: generateCookie(),
           'X-Ds-Pow-Response': challengeAnswer,
         },

@@ -25,17 +25,18 @@ const FAKE_HEADERS = {
   Pragma: 'no-cache',
   Priority: 'u=1, i',
   Referer: `${DEEPSEEK_API_BASE}/`,
-  'Sec-Ch-Ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+  'Sec-Ch-Ua': '"Google Chrome";v="147", "Chromium";v="147", "Not_A Brand";v="24"',
   'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"macOS"',
+  'Sec-Ch-Ua-Platform': '"Windows"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
   'X-App-Version': '20241129.1',
-  'X-Client-Locale': 'zh-CN',
+  'X-Client-Locale': 'zh_CN',
   'X-Client-Platform': 'web',
-  'X-Client-Version': '1.6.1',
+  'X-Client-Timezone-Offset': '28800',
+  'X-Client-Version': '2.0.0',
 }
 
 export class DeepSeekAdapter extends BaseOAuthAdapter {
