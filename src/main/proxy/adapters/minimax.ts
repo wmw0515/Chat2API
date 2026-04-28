@@ -684,6 +684,43 @@ export class MiniMaxAdapter {
     return { response, stream: null, chatId }
   }
 
+  async validateCredentialFlow(): Promise<{ valid: boolean; error?: string }> {
+    const missingFields: string[] = []
+    if (!this.jwtToken || !this.jwtToken.trim()) {
+      missingFields.push('token')
+    }
+    if (!this.realUserID || !this.realUserID.trim()) {
+      missingFields.push('realUserID')
+    }
+    if (!this.configuredWebUuid || !this.configuredWebUuid.trim()) {
+      missingFields.push('webUuid')
+    }
+
+    if (missingFields.length > 0) {
+      return {
+        valid: false,
+        error: `Missing required credentials: ${missingFields.join(', ')}`,
+      }
+    }
+
+    const deviceInfo = await this.requestDeviceInfo()
+    const requestBody = this.messagesPrepare(
+      [{ role: 'user', content: 'ping' }],
+      this.model || 'MiniMax-M2.7'
+    )
+    const sendResponse = await this.requestWebSendMsg('POST', '/matrix/api/v1/chat/send_msg', requestBody, deviceInfo)
+    const { code, message } = parseMiniMaxError(sendResponse.data)
+
+    if (sendResponse.status === 200 && code === 0) {
+      return { valid: true }
+    }
+
+    return {
+      valid: false,
+      error: `MiniMax send_msg failed (HTTP ${sendResponse.status}, code ${code ?? 'unknown'}): ${message || 'Unknown error'}`,
+    }
+  }
+
   private async pollForResponse(chatId: string, deviceInfo: DeviceInfo, maxPolls = 120, pollInterval = 1000): Promise<any> {
     let pollCount = 0
     

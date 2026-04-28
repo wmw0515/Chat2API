@@ -461,12 +461,12 @@ export function Providers() {
 
   const handleValidateAccount = async (id: string) => {
     try {
-      const checkResult = await window.electronAPI.accounts.check(id)
-      if (checkResult.success) {
+      const validationResult = await window.electronAPI.accounts.validate(id)
+      if (validationResult.valid) {
         store.updateAccount(id, {
           status: 'active',
-          healthStatus: 'active',
-          lastValidatedAt: checkResult.checkedAt,
+          healthStatus: validationResult.healthStatus || 'active',
+          lastValidatedAt: validationResult.validatedAt,
           lastValidationError: undefined,
         })
         
@@ -481,23 +481,18 @@ export function Providers() {
         
         toast({
           title: t('providers.checkAccount'),
-          description: '模型可用',
+          description: t('providers.credentialsValidationSuccess'),
         })
       } else {
-        const healthStatus = checkResult.status === 'credential_error' ? 'invalid' : 'error'
-        const messageMap: Record<string, string> = {
-          credential_error: '凭证失效',
-          model_invalid: '模型无效',
-          connection_error: '连接异常',
-          unknown_error: '未知错误',
-        }
-        const message = messageMap[checkResult.status] || '未知错误'
+        const healthStatus = validationResult.healthStatus || 'error'
+        const message = validationResult.error || t('providers.credentialsValidationFailed')
         store.updateAccount(id, {
           ...(healthStatus === 'invalid' ? { status: 'error' as const } : {}),
-          errorMessage: checkResult.errorMessage || message,
+          errorMessage: message,
           healthStatus,
-          lastValidatedAt: checkResult.checkedAt || Date.now(),
-          lastValidationError: checkResult.errorMessage || message,
+          lastValidatedAt: validationResult.validatedAt || Date.now(),
+          lastValidationError: message,
+          lastValidationLatency: validationResult.lastValidationLatency,
         })
         
         if (store.selectedProviderId) {
