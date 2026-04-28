@@ -104,10 +104,15 @@ export class ProviderManager {
     credentialFields?: Array<{
       name: string
       label: string
-      type: 'text' | 'password' | 'textarea'
+      type: 'text' | 'password' | 'textarea' | 'number' | 'select' | 'json'
       required: boolean
+      secret?: boolean
+      order?: number
       placeholder?: string
       helpText?: string
+      sanitize?: 'none' | 'singleLine' | 'cookie' | 'numeric' | 'jwt'
+      enabled?: boolean
+      options?: Array<{ label: string; value: string }>
     }>
     type?: ProviderType
     id?: string
