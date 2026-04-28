@@ -260,6 +260,7 @@ class StoreManager {
             modelMappings: hasUserOverrides ? p.modelMappings : builtinConfig.modelMappings,
             headers: builtinConfig.headers,
             description: builtinConfig.description,
+            credentialFields: builtinConfig.credentialFields,
           }
         }
       }
@@ -295,6 +296,7 @@ class StoreManager {
           description: builtinConfig.description,
           supportedModels: builtinConfig.supportedModels,
           modelMappings: builtinConfig.modelMappings,
+          credentialFields: builtinConfig.credentialFields,
         }
         providers.push(newProvider)
         this.store!.set('providers', providers)
