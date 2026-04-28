@@ -37,6 +37,10 @@ export class DeepSeekStreamHandler {
   private webSearchEnabled: boolean
   private reasoningEffort: string | undefined
   private doneHandled: boolean = false
+  private deepSeekUpstreamDebugEnabled: boolean
+  private upstreamDataLineIndex: number = 0
+  private streamVisibleContentLength: number = 0
+  private streamThinkingContentLength: number = 0
 
   constructor(
     model: string,
@@ -52,6 +56,7 @@ export class DeepSeekStreamHandler {
     this.toolCallState = createToolCallState()
     this.webSearchEnabled = webSearchEnabled
     this.reasoningEffort = reasoningEffort
+    this.deepSeekUpstreamDebugEnabled = process.env.CHAT2API_DEEPSEEK_UPSTREAM_DEBUG === '1'
   }
 
   getLastMessageId(): string {
@@ -64,6 +69,68 @@ export class DeepSeekStreamHandler {
     } catch {
       return null
     }
+  }
+
+  private debugDeepSeekUpstreamSSE(dataLine: string, parsed: StreamChunk | null): void {
+    if (!this.deepSeekUpstreamDebugEnabled) return
+
+    this.upstreamDataLineIndex += 1
+
+    const payload: Record<string, any> = {
+      line_index: this.upstreamDataLineIndex,
+      parse_ok: !!parsed,
+    }
+
+    if (!parsed) {
+      payload.raw_kind = dataLine.startsWith('{') ? 'json_unparsed' : 'non_json'
+      console.log('[DeepSeek][UpstreamSSE]', JSON.stringify(payload))
+      return
+    }
+
+    const parsedAsRecord = parsed as Record<string, any>
+    payload.top_level_keys = Object.keys(parsedAsRecord)
+    if (typeof parsed.p === 'string') payload.p = parsed.p
+    if (typeof parsed.o === 'string') payload.o = parsed.o
+    if (parsed.v !== undefined) {
+      payload.v_type = Array.isArray(parsed.v) ? 'array' : typeof parsed.v
+    }
+
+    if (parsed.v && typeof parsed.v === 'object' && !Array.isArray(parsed.v)) {
+      const vRecord = parsed.v as Record<string, any>
+      payload.v_keys = Object.keys(vRecord)
+      if (vRecord.response && typeof vRecord.response === 'object') {
+        const response = vRecord.response as Record<string, any>
+        payload.response_keys = Object.keys(response)
+        if (Array.isArray(response.fragments)) {
+          payload.response_fragments = {
+            count: response.fragments.length,
+            types: response.fragments.map((fragment: any) => fragment?.type || 'unknown'),
+            content_lengths: response.fragments.map((fragment: any) =>
+              typeof fragment?.content === 'string' ? fragment.content.length : 0
+            ),
+          }
+        }
+      }
+    }
+
+    if (parsed.p === 'response/fragments' && parsed.o === 'APPEND' && Array.isArray(parsed.v)) {
+      payload.appended_fragments = parsed.v.map((fragment: any) => ({
+        type: fragment?.type || 'unknown',
+        content_length: typeof fragment?.content === 'string' ? fragment.content.length : 0,
+      }))
+    }
+
+    if (parsed.p === 'response/fragments/-1/content' && typeof parsed.v === 'string') {
+      payload.content_append_length = parsed.v.length
+    }
+
+    if (!parsed.p && typeof parsed.v === 'string') {
+      payload.bare_v_length = parsed.v.length
+    }
+
+    payload.accumulated_visible_content_length = this.streamVisibleContentLength
+    payload.accumulated_thinking_content_length = this.streamThinkingContentLength
+    console.log('[DeepSeek][UpstreamSSE]', JSON.stringify(payload))
   }
 
   private createChunk(delta: { role?: string; content?: string; reasoning_content?: string; tool_calls?: any[] }, finishReason?: string): string {
@@ -141,11 +208,20 @@ export class DeepSeekStreamHandler {
 
         const data = line.slice(5).trim()
         if (data === '[DONE]') {
+          if (this.deepSeekUpstreamDebugEnabled) {
+            console.log('[DeepSeek][UpstreamSSE]', JSON.stringify({
+              line_index: this.upstreamDataLineIndex + 1,
+              status: 'done_marker_received',
+              accumulated_visible_content_length: this.streamVisibleContentLength,
+              accumulated_thinking_content_length: this.streamThinkingContentLength,
+            }))
+          }
           this.handleDone(transStream, isFoldModel, isSearchSilentModel)
           return
         }
 
         const parsed = this.parseSSE(data)
+        this.debugDeepSeekUpstreamSSE(data, parsed)
         if (!parsed) continue
 
         this.processChunk(parsed, transStream, isThinkingModel, isSilentModel, isFoldModel, isSearchSilentModel)
@@ -270,6 +346,11 @@ export class DeepSeekStreamHandler {
     isSearchSilentModel: boolean
   ): void {
     const processedContent = this.normalizeContent(content, isSearchSilentModel)
+    if (path === 'thinking') {
+      this.streamThinkingContentLength += processedContent.length
+    } else {
+      this.streamVisibleContentLength += processedContent.length
+    }
 
     // For 'content' path, check for tool calls using processStreamContent
     if (path === 'content' || path === '') {
@@ -345,6 +426,13 @@ export class DeepSeekStreamHandler {
       return
     }
     this.doneHandled = true
+    if (this.deepSeekUpstreamDebugEnabled) {
+      console.log('[DeepSeek][UpstreamSSE]', JSON.stringify({
+        status: 'stream_close',
+        accumulated_visible_content_length: this.streamVisibleContentLength,
+        accumulated_thinking_content_length: this.streamThinkingContentLength,
+      }))
+    }
 
     // Flush tool call buffer before finishing
     const baseChunk = createBaseChunk(`${this.sessionId}@${this.messageId}`, this.model, this.created)
@@ -389,6 +477,8 @@ export class DeepSeekStreamHandler {
     const isThinkingModel = this.model.includes('think') || this.model.includes('r1') || !!this.reasoningEffort
     const isFoldModel = (this.model.includes('fold') || this.model.includes('search') || this.webSearchEnabled) && !isThinkingModel
     const isSearchSilentModel = this.model.includes('search-silent')
+    const debugEnabled = this.deepSeekUpstreamDebugEnabled
+    let dataLineIndex = 0
 
     return new Promise((resolve, reject) => {
       let buffer = ''
@@ -402,10 +492,63 @@ export class DeepSeekStreamHandler {
           if (!line.trim() || !line.startsWith('data:')) continue
 
           const data = line.slice(5).trim()
-          if (data === '[DONE]') return
+          if (data === '[DONE]') {
+            if (debugEnabled) {
+              console.log('[DeepSeek][UpstreamSSE][NonStream]', JSON.stringify({
+                line_index: dataLineIndex + 1,
+                status: 'done_marker_received',
+                accumulated_visible_content_length: accumulatedContent.length,
+                accumulated_thinking_content_length: accumulatedThinkingContent.length,
+              }))
+            }
+            return
+          }
 
           try {
             const parsed = JSON.parse(data)
+            dataLineIndex += 1
+            if (debugEnabled) {
+              const payload: Record<string, any> = {
+                line_index: dataLineIndex,
+                parse_ok: true,
+                top_level_keys: Object.keys(parsed as Record<string, any>),
+                accumulated_visible_content_length: accumulatedContent.length,
+                accumulated_thinking_content_length: accumulatedThinkingContent.length,
+              }
+              if (typeof parsed.p === 'string') payload.p = parsed.p
+              if (typeof parsed.o === 'string') payload.o = parsed.o
+              if (parsed.v !== undefined) {
+                payload.v_type = Array.isArray(parsed.v) ? 'array' : typeof parsed.v
+              }
+              if (parsed.v && typeof parsed.v === 'object' && !Array.isArray(parsed.v)) {
+                payload.v_keys = Object.keys(parsed.v as Record<string, any>)
+                if (parsed.v.response && typeof parsed.v.response === 'object') {
+                  payload.response_keys = Object.keys(parsed.v.response as Record<string, any>)
+                  if (Array.isArray(parsed.v.response.fragments)) {
+                    payload.response_fragments = {
+                      count: parsed.v.response.fragments.length,
+                      types: parsed.v.response.fragments.map((fragment: any) => fragment?.type || 'unknown'),
+                      content_lengths: parsed.v.response.fragments.map((fragment: any) =>
+                        typeof fragment?.content === 'string' ? fragment.content.length : 0
+                      ),
+                    }
+                  }
+                }
+              }
+              if (parsed.p === 'response/fragments' && parsed.o === 'APPEND' && Array.isArray(parsed.v)) {
+                payload.appended_fragments = parsed.v.map((fragment: any) => ({
+                  type: fragment?.type || 'unknown',
+                  content_length: typeof fragment?.content === 'string' ? fragment.content.length : 0,
+                }))
+              }
+              if (parsed.p === 'response/fragments/-1/content' && typeof parsed.v === 'string') {
+                payload.content_append_length = parsed.v.length
+              }
+              if (!parsed.p && typeof parsed.v === 'string') {
+                payload.bare_v_length = parsed.v.length
+              }
+              console.log('[DeepSeek][UpstreamSSE][NonStream]', JSON.stringify(payload))
+            }
             let handledFragments = false
             
             if (parsed.response_message_id && !messageId) {
@@ -479,12 +622,28 @@ export class DeepSeekStreamHandler {
               }
             }
           } catch {
-            // Ignore parse errors
+            if (debugEnabled) {
+              dataLineIndex += 1
+              console.log('[DeepSeek][UpstreamSSE][NonStream]', JSON.stringify({
+                line_index: dataLineIndex,
+                parse_ok: false,
+                raw_kind: data.startsWith('{') ? 'json_unparsed' : 'non_json',
+                accumulated_visible_content_length: accumulatedContent.length,
+                accumulated_thinking_content_length: accumulatedThinkingContent.length,
+              }))
+            }
           }
         }
       })
 
       stream.on('end', () => {
+        if (debugEnabled) {
+          console.log('[DeepSeek][UpstreamSSE][NonStream]', JSON.stringify({
+            status: 'stream_end',
+            accumulated_visible_content_length: accumulatedContent.length,
+            accumulated_thinking_content_length: accumulatedThinkingContent.length,
+          }))
+        }
         // Parse tool calls from accumulated content
         const { content: cleanContent, toolCalls } = parseToolCallsFromText(accumulatedContent)
 
