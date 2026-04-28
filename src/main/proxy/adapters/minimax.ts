@@ -128,6 +128,82 @@ interface ChatListItem {
 
 const deviceInfoMap = new Map<string, DeviceInfo>()
 const DEVICE_INFO_EXPIRES = 10800
+const MINIMAX_SEND_DEBUG = process.env.CHAT2API_MINIMAX_SEND_DEBUG === '1'
+
+function sanitizeCookieHeaderValue(rawValue: string): string {
+  return rawValue
+    .trim()
+    .replace(/[\r\n\t]+/g, '; ')
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+function summarizeMiniMaxSendMsgRequest(
+  method: string,
+  uri: string,
+  userData: Record<string, any>,
+  headers: Record<string, string>,
+  data: any
+): Record<string, any> {
+  const queryKeys = Object.keys(userData).filter((key) => userData[key] !== undefined && userData[key] !== null)
+  const cookieHeader = headers.Cookie || ''
+  const tokenInQuery = typeof userData.token === 'string' ? userData.token : ''
+  const modelOption = data?.model_option && typeof data.model_option === 'object' ? data.model_option : {}
+  return {
+    method,
+    path: uri,
+    queryKeys,
+    hasTokenInQuery: Boolean(tokenInQuery),
+    tokenLength: tokenInQuery.length,
+    hasCookieHeader: Boolean(cookieHeader),
+    cookieLength: cookieHeader.length,
+    hasTokenHeader: Boolean(headers.token),
+    hasAuthorizationHeader: Boolean(headers.Authorization),
+    hasReferer: Boolean(headers.Referer),
+    uuidPresent: Boolean(userData.uuid),
+    deviceIdPresent: Boolean(userData.device_id),
+    userIdPresent: Boolean(userData.user_id),
+    version_code: userData.version_code,
+    app_id: userData.app_id,
+    biz_id: userData.biz_id,
+    browser_name: userData.browser_name,
+    os_name: userData.os_name,
+    client: userData.client,
+    bodyTopLevelKeys: data && typeof data === 'object' ? Object.keys(data) : [],
+    body_chat_type: data?.chat_type,
+    body_msg_type: data?.msg_type,
+    bodyHasChatId: data?.chat_id !== undefined && data?.chat_id !== null,
+    body_model_option_display_name: modelOption.display_name,
+    body_model_option_model_type: modelOption.model_type,
+    sub_agent_ids_length: Array.isArray(data?.sub_agent_ids) ? data.sub_agent_ids.length : 0,
+    selected_mcp_tools_length: Array.isArray(data?.selected_mcp_tools) ? data.selected_mcp_tools.length : 0,
+    attachments_length: Array.isArray(data?.attachments) ? data.attachments.length : 0,
+    user_text_length: typeof data?.text === 'string' ? data.text.length : 0,
+  }
+}
+
+function summarizeMiniMaxSendMsgResponse(status: number, headers: Record<string, any>, data: any): Record<string, any> {
+  const responseBody = data && typeof data === 'object' ? data : {}
+  return {
+    httpStatus: status,
+    contentType: headers?.['content-type'] || headers?.['Content-Type'] || 'unknown',
+    topLevelResponseKeys: Object.keys(responseBody),
+    baseRespStatusCode: responseBody?.base_resp?.status_code,
+    baseRespStatusMsg: responseBody?.base_resp?.status_msg,
+    statusInfoCode: responseBody?.statusInfo?.code,
+    statusInfoMessage: responseBody?.statusInfo?.message,
+    hasChatId: responseBody?.chat_id !== undefined && responseBody?.chat_id !== null,
+    hasMsgId: responseBody?.msg_id !== undefined && responseBody?.msg_id !== null,
+    responseBodyLength: (() => {
+      try {
+        return JSON.stringify(data ?? {}).length
+      } catch {
+        return -1
+      }
+    })(),
+  }
+}
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -217,6 +293,7 @@ export class MiniMaxAdapter {
   private rawToken: string
   private jwtToken: string
   private realUserID: string
+  private cookies: string
   private model: string
   private created: number
 
@@ -224,6 +301,7 @@ export class MiniMaxAdapter {
     this.provider = provider
     this.account = account
     this.rawToken = account.credentials.token || ''
+    this.cookies = sanitizeCookieHeaderValue(String(account.credentials.cookies || ''))
     this.model = 'MiniMax-M2.7'
     this.created = unixTimestamp()
 
@@ -368,19 +446,34 @@ export class MiniMaxAdapter {
     userData.token = this.jwtToken
     const queryStr = buildQuery(userData)
     const fullUri = `${uri}${uri.lastIndexOf('?') != -1 ? '&' : '?'}${queryStr}`
+    const requestHeaders: Record<string, string> = {
+      Referer: `${AGENT_BASE_URL}/`,
+      ...FAKE_HEADERS,
+      'Content-Type': 'application/json',
+    }
 
-    return await axios.request({
+    if (this.cookies) {
+      requestHeaders.Cookie = this.cookies
+    }
+
+    if (MINIMAX_SEND_DEBUG) {
+      console.log('[MiniMax][send_msg][request]', summarizeMiniMaxSendMsgRequest(method, uri, userData, requestHeaders, data))
+    }
+
+    const response = await axios.request({
       method,
       url: `${AGENT_BASE_URL}${fullUri}`,
       data,
       timeout: 15000,
       validateStatus: () => true,
-      headers: {
-        Referer: `${AGENT_BASE_URL}/`,
-        ...FAKE_HEADERS,
-        'Content-Type': 'application/json',
-      },
+      headers: requestHeaders,
     })
+
+    if (MINIMAX_SEND_DEBUG) {
+      console.log('[MiniMax][send_msg][response]', summarizeMiniMaxSendMsgResponse(response.status, response.headers || {}, response.data))
+    }
+
+    return response
   }
 
   private resolveModelOption(model: string): { display_name: string; model_type: number } {

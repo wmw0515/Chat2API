@@ -12,6 +12,31 @@ import { validateCredentials } from './validator'
  * Provides all operations related to accounts
  */
 export class AccountManager {
+  private static sanitizeMiniMaxCookie(rawValue: string): string {
+    return rawValue
+      .trim()
+      .replace(/[\r\n\t]+/g, '; ')
+      .replace(/[\x00-\x1F\x7F]/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+  }
+
+  private static sanitizeProviderCredentials(
+    providerId: string,
+    credentials: Record<string, string>
+  ): Record<string, string> {
+    if (providerId !== 'minimax') {
+      return credentials
+    }
+
+    const sanitized = { ...credentials }
+    const rawCookies = sanitized.cookies
+    if (typeof rawCookies === 'string') {
+      sanitized.cookies = this.sanitizeMiniMaxCookie(rawCookies)
+    }
+    return sanitized
+  }
+
   private static mapValidationHealthStatus(error?: string): AccountHealthStatus {
     if (!error) return 'error'
 
@@ -114,12 +139,13 @@ export class AccountManager {
     }
     
     const now = Date.now()
+    const sanitizedCredentials = this.sanitizeProviderCredentials(data.providerId, data.credentials)
     const account: Account = {
       id: storeManager.generateId(),
       providerId: data.providerId,
       name: data.name,
       email: data.email,
-      credentials: data.credentials,
+      credentials: sanitizedCredentials,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -157,7 +183,12 @@ export class AccountManager {
       throw new Error(`Account not found: ${id}`)
     }
     
-    const updated = storeManager.updateAccount(id, updates)
+    const normalizedUpdates = { ...updates }
+    if (normalizedUpdates.credentials) {
+      normalizedUpdates.credentials = this.sanitizeProviderCredentials(existing.providerId, normalizedUpdates.credentials)
+    }
+
+    const updated = storeManager.updateAccount(id, normalizedUpdates)
     
     if (updated) {
       storeManager.addLog('info', `Updated account: ${existing.name}`, {
