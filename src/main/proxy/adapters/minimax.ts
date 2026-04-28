@@ -30,37 +30,44 @@ const FAKE_HEADERS = {
   'Cache-Control': 'no-cache',
   Origin: 'https://agent.minimaxi.com',
   Pragma: 'no-cache',
-  'Sec-Ch-Ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
+  'Sec-Ch-Ua': '"Firefox";v="125", "Not_A Brand";v="99"',
   'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"macOS"',
+  'Sec-Ch-Ua-Platform': '"Windows"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
 }
 
-const FAKE_USER_DATA: Record<string, any> = {
+const WEB_QUERY_BASE: Record<string, any> = {
   device_platform: 'web',
   biz_id: '3',
   app_id: '3001',
   version_code: '22201',
-  uuid: null,
-  device_id: null,
-  os_name: 'Mac',
-  browser_name: 'chrome',
-  device_memory: 8,
-  cpu_core_num: 11,
+  os_name: 'Windows',
+  browser_name: 'firefox',
+  cpu_core_num: 8,
   browser_language: 'zh-CN',
-  browser_platform: 'MacIntel',
-  user_id: null,
+  browser_platform: 'Win32',
   screen_width: 1920,
   screen_height: 1080,
-  unix: null,
   lang: 'zh',
-  token: null,
   timezone_offset: 28800,
   sys_language: 'zh',
   client: 'web',
+}
+
+const DEFAULT_SUB_AGENT_IDS = [
+  340123961561242,
+  340123961561243,
+  340123961561244,
+  340123961561245,
+  355305220752206,
+  386069372367665,
+]
+
+const MODEL_OPTIONS: Record<string, { display_name: string; model_type: number }> = {
+  'MiniMax-M2.7': { display_name: 'MiniMax-M2.7', model_type: 501 },
 }
 
 interface MiniMaxMessage {
@@ -122,6 +129,13 @@ function unixTimestamp(): number {
   return Math.floor(Date.now() / 1000)
 }
 
+function parseMiniMaxError(data: any): { code?: number; message?: string } {
+  return {
+    code: data?.base_resp?.status_code ?? data?.statusInfo?.code,
+    message: data?.base_resp?.status_msg ?? data?.statusInfo?.message,
+  }
+}
+
 function tokenSplit(authorization: string): string[] {
   const token = authorization.replace('Bearer ', '')
   
@@ -144,7 +158,6 @@ function parseJWTUserID(jwtToken: string): string {
     // JWT format: header.payload.signature
     const parts = jwtToken.split('.')
     if (parts.length !== 3) {
-      console.log('[MiniMax] Invalid JWT format, expected 3 parts, got:', parts.length)
       return ''
     }
     
@@ -159,10 +172,9 @@ function parseJWTUserID(jwtToken: string): string {
     
     // MiniMax JWT contains user.id
     const userID = payloadObj?.user?.id || ''
-    console.log('[MiniMax] Parsed userID from JWT:', userID)
     return userID
   } catch (error) {
-    console.error('[MiniMax] Failed to parse JWT:', error)
+    console.error('[MiniMax] Failed to parse JWT user id')
     return ''
   }
 }
@@ -189,7 +201,7 @@ export class MiniMaxAdapter {
     this.provider = provider
     this.account = account
     this.rawToken = account.credentials.token || ''
-    this.model = 'MiniMax-M2.5'
+    this.model = 'MiniMax-M2.7'
     this.created = unixTimestamp()
 
     // Check if realUserID is provided separately in credentials
@@ -199,7 +211,6 @@ export class MiniMaxAdapter {
       // User provided realUserID separately, use it directly
       this.realUserID = providedRealUserID.trim()
       this.jwtToken = this.rawToken
-      console.log('[MiniMax] Using provided realUserID:', this.realUserID)
     } else {
       // No separate realUserID, check if token is in realUserID+JWTtoken format
       const tokens = tokenSplit(this.rawToken)
@@ -210,16 +221,12 @@ export class MiniMaxAdapter {
         const parts = fullToken.split('+')
         this.realUserID = parts[0]
         this.jwtToken = parts[1]
-        console.log('[MiniMax] Token contains realUserID+JWT format, realUserID:', this.realUserID)
       } else {
         // Just JWT token, parse userID from it
         this.jwtToken = fullToken
         this.realUserID = parseJWTUserID(this.jwtToken)
-        console.log('[MiniMax] Parsed realUserID from JWT:', this.realUserID)
       }
     }
-
-    console.log('[MiniMax] Token parsed - realUserID:', this.realUserID, 'jwtToken:', this.jwtToken.substring(0, 30) + '...')
   }
 
   private async requestDeviceInfo(): Promise<DeviceInfo> {
@@ -234,7 +241,7 @@ export class MiniMaxAdapter {
     const unix = `${Date.now()}`
     const timestamp = unixTimestamp()
     
-    const userData = { ...FAKE_USER_DATA }
+    const userData = { ...WEB_QUERY_BASE }
     userData.uuid = randomUuid
     userData.user_id = this.realUserID
     userData.unix = unix
@@ -251,8 +258,6 @@ export class MiniMaxAdapter {
     const fullUri = `/v1/api/user/device/register?${queryStr}`
     const yy = md5(`${encodeURIComponent(fullUri)}_${dataJson}${md5(unix)}ooui`)
     const signature = md5(`${timestamp}${this.jwtToken}${dataJson}`)
-
-    console.log('[MiniMax] Registering device - randomUuid:', randomUuid, 'realUserID:', this.realUserID)
 
     const response = await axios.post(
       `${AGENT_BASE_URL}${fullUri}`,
@@ -272,8 +277,6 @@ export class MiniMaxAdapter {
       }
     )
 
-    console.log('[MiniMax] Device register response:', response.status, JSON.stringify(response.data))
-
     if (response.status !== 200 || response.data?.statusInfo?.code !== 0) {
       throw new Error(`Failed to register device: ${response.data?.statusInfo?.message || response.status}`)
     }
@@ -290,7 +293,6 @@ export class MiniMaxAdapter {
     }
 
     deviceInfoMap.set(cacheKey, result)
-    console.log('[MiniMax] Device info cached:', { deviceId: result.deviceId, userId: result.userId, realUserID: result.realUserID, uuid: result.uuid })
     return result
   }
 
@@ -300,15 +302,12 @@ export class MiniMaxAdapter {
     data: any,
     deviceInfo: DeviceInfo
   ): Promise<AxiosResponse> {
-    const unix = `${Date.now()}`
-    const timestamp = unixTimestamp()
-    
-    const userData = { ...FAKE_USER_DATA }
+    const userData = { ...WEB_QUERY_BASE }
     const realUserID = deviceInfo.realUserID || deviceInfo.userId
-    userData.uuid = realUserID
+    userData.uuid = deviceInfo.uuid || uuid()
     userData.device_id = deviceInfo.deviceId || undefined
     userData.user_id = realUserID
-    userData.unix = unix
+    userData.unix = `${Date.now()}`
     userData.token = this.jwtToken
     
     let queryStr = ''
@@ -318,12 +317,7 @@ export class MiniMaxAdapter {
     }
     queryStr = queryStr.substring(1)
     
-    const dataJson = JSON.stringify(data || {})
     const fullUri = `${uri}${uri.lastIndexOf('?') != -1 ? '&' : '?'}${queryStr}`
-    const yy = md5(`${encodeURIComponent(fullUri)}_${dataJson}${md5(unix)}ooui`)
-    const signature = md5(`${timestamp}${this.jwtToken}${dataJson}`)
-
-    console.log('[MiniMax] Request - uuid:', realUserID, 'user_id:', realUserID, 'device_id:', deviceInfo.deviceId)
 
     return await axios.request({
       method,
@@ -333,12 +327,8 @@ export class MiniMaxAdapter {
       validateStatus: () => true,
       headers: {
         Referer: `${AGENT_BASE_URL}/`,
-        token: this.jwtToken,
         ...FAKE_HEADERS,
         'Content-Type': 'application/json',
-        'x-timestamp': String(timestamp),
-        'x-signature': signature,
-        yy: yy,
       },
     })
   }
@@ -349,16 +339,12 @@ export class MiniMaxAdapter {
     requestBody: any,
     deviceInfo: DeviceInfo
   ): Promise<{ session: ClientHttp2Session; stream: ClientHttp2Stream }> {
-    const unix = `${Date.now()}`
-    const timestamp = unixTimestamp()
-
-    const userData = { ...FAKE_USER_DATA }
-    // Both uuid and user_id should use realUserID (matching reference implementation)
+    const userData = { ...WEB_QUERY_BASE }
     const realUserID = deviceInfo.realUserID || deviceInfo.userId
-    userData.uuid = realUserID
+    userData.uuid = deviceInfo.uuid || uuid()
     userData.device_id = deviceInfo.deviceId || undefined
     userData.user_id = realUserID
-    userData.unix = unix
+    userData.unix = `${Date.now()}`
     userData.token = this.jwtToken
 
     let queryStr = ''
@@ -369,13 +355,6 @@ export class MiniMaxAdapter {
     queryStr = queryStr.substring(1)
 
     const dataJson = JSON.stringify(requestBody)
-    const yy = md5(`${encodeURIComponent(`${uri}?${queryStr}`)}_${dataJson}${md5(unix)}ooui`)
-    const signature = md5(`${timestamp}${this.jwtToken}${dataJson}`)
-
-    console.log('[MiniMax] Stream Request - uuid:', realUserID, 'user_id:', realUserID, 'device_id:', deviceInfo.deviceId)
-    console.log('[MiniMax] Request body:', dataJson)
-    console.log('[MiniMax] Query string:', queryStr)
-    console.log('[MiniMax] Headers - timestamp:', timestamp, 'signature:', signature.substring(0, 16) + '...', 'yy:', yy.substring(0, 16) + '...')
 
     const session = await new Promise<ClientHttp2Session>((resolve, reject) => {
       const session = http2.connect(AGENT_BASE_URL)
@@ -383,21 +362,14 @@ export class MiniMaxAdapter {
       session.on('error', reject)
     })
 
-    // Use lowercase headers to match reference implementation
-    // Important: Accept header must be set after FAKE_HEADERS to override it
-    // Order matters: FAKE_HEADERS -> x-timestamp -> x-signature -> Accept -> yy
     const headers: any = {
       ':method': method,
       ':path': `${uri}?${queryStr}`,
       ':scheme': 'https',
       'content-type': 'application/json',
       Referer: 'https://agent.minimaxi.com/',
-      token: this.jwtToken,
       ...FAKE_HEADERS,
-      'x-timestamp': `${timestamp}`,
-      'x-signature': signature,
-      Accept: 'text/event-stream', // Must be after FAKE_HEADERS to override
-      yy: yy,
+      Accept: 'text/event-stream',
     }
 
     const stream = session.request(headers)
@@ -425,130 +397,38 @@ export class MiniMaxAdapter {
     return { session, stream }
   }
 
-  private messagesPrepare(messages: MiniMaxMessage[], toolsPrompt?: string, isMultiTurn: boolean = false): any {
-    // Process messages including tool calls and tool responses
-    const processedMessages = messages.map(msg => {
-      // Handle tool calls in assistant message
-      if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
-        const toolCallsText = msg.tool_calls.map(tc => {
-          return `[call:${tc.function.name}]${tc.function.arguments}[/call]`
-        }).join('\n')
-        return { ...msg, content: `[function_calls]\n${toolCallsText}\n[/function_calls]` }
-      }
-      // Handle tool response message
-      if (msg.role === 'tool' && msg.tool_call_id) {
-        return { 
-          ...msg, 
-          role: 'user' as const,
-          content: `[TOOL_RESULT for ${msg.tool_call_id}] ${msg.content || ''}` 
-        }
-      }
-      return msg
-    })
+  private resolveModelOption(model: string): { display_name: string; model_type: number } {
+    return MODEL_OPTIONS[model] || { display_name: model, model_type: 501 }
+  }
 
-    // Extract system message first
-    let systemContent = ''
-    const otherMessages = processedMessages.filter(msg => {
-      if (msg.role === 'system') {
-        const text = typeof msg.content === 'string' ? msg.content : ''
-        systemContent = text
-        return false
-      }
-      return true
-    })
-    
-    let content = ''
-    
-    // Prepend system message if exists
-    if (systemContent) {
-      content = `system:${systemContent}\n`
-    }
-    
-    // For multi-turn with existing session, only send the last user message
-    if (isMultiTurn) {
-      // Find last user message index manually (ES2021 compatible)
-      let lastUserIdx = -1
-      for (let i = otherMessages.length - 1; i >= 0; i--) {
-        if (otherMessages[i].role === 'user') {
-          lastUserIdx = i
-          break
-        }
-      }
-      
-      if (lastUserIdx !== -1) {
-        const lastUserMsg = otherMessages[lastUserIdx]
-        const text = typeof lastUserMsg.content === 'string' ? lastUserMsg.content : ''
-        content += `user:${text}\n`
-        
-        // Include any tool results after the last user message
-        for (let i = lastUserIdx + 1; i < otherMessages.length; i++) {
-          if (otherMessages[i].role === 'user') {
-            const toolText = typeof otherMessages[i].content === 'string' ? otherMessages[i].content : ''
-            content += `user:${toolText}\n`
-          }
-        }
-        
-        if (toolsPrompt) {
-          content = content.trim() + '\n\n' + toolsPrompt
-        }
-        return {
-          msg_type: 1,
-          text: content,
-          chat_type: 1,
-          attachments: [],
-          selected_mcp_tools: [],
-          backend_config: {},
-          sub_agent_ids: [],
-        }
+  private extractFinalUserText(messages: MiniMaxMessage[], toolsPrompt?: string): string {
+    let finalText = ''
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        finalText = typeof messages[i].content === 'string' ? messages[i].content : ''
+        break
       }
     }
-    
-    if (otherMessages.length < 2) {
-      content += otherMessages.reduce((acc, msg) => {
-        const text = typeof msg.content === 'string' ? msg.content : ''
-        return acc + `${msg.role}:${text}\n`
-      }, '')
-    } else {
-      const latestMessage = otherMessages[otherMessages.length - 1]
-      const hasFileOrImage = Array.isArray(latestMessage.content) &&
-        latestMessage.content.some((v: any) => typeof v === 'object' && ['file', 'image_url'].includes(v.type))
-      
-      if (hasFileOrImage) {
-        const newFileMessage: MiniMaxMessage = {
-          content: '关注用户最新发送文件和消息',
-          role: 'system',
-        }
-        otherMessages.push(newFileMessage)
-      }
-      
-      content += otherMessages.reduce((acc, msg) => {
-        const text = typeof msg.content === 'string' ? msg.content : ''
-        return acc + `${msg.role}:${text}\n`
-      }, '') + 'assistant:\n'
-      
-      content = content.trim().replace(/\!\[.+\]\(.+\)/g, '')
-    }
-
-    // Append tools prompt at the end if provided
     if (toolsPrompt) {
-      content = content.trim() + '\n\n' + toolsPrompt
+      finalText = finalText.trim() ? `${finalText}\n\n${toolsPrompt}` : toolsPrompt
     }
+    return finalText
+  }
 
+  private messagesPrepare(messages: MiniMaxMessage[], model: string, toolsPrompt?: string): any {
     return {
       msg_type: 1,
-      text: content,
-      chat_type: 1,
+      text: this.extractFinalUserText(messages, toolsPrompt),
+      chat_type: 2,
       attachments: [],
       selected_mcp_tools: [],
-      backend_config: {},
-      sub_agent_ids: [],
+      sub_agent_ids: DEFAULT_SUB_AGENT_IDS,
+      model_option: this.resolveModelOption(model),
     }
   }
 
   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse | null; stream: { session: ClientHttp2Session; stream: ClientHttp2Stream } | null; chatId: string }> {
-    console.log('[MiniMax] chatCompletion called with model:', request.model, 'stream:', request.stream)
-    
-    this.model = request.model || 'MiniMax-M2.5'
+    this.model = request.model || 'MiniMax-M2.7'
     this.created = unixTimestamp()
     
     const deviceInfo = await this.requestDeviceInfo()
@@ -572,47 +452,31 @@ export class MiniMaxAdapter {
       }
     }
     
-    const requestBody = this.messagesPrepare(messages, toolsPrompt, false)
+    const requestBody = this.messagesPrepare(messages, this.model, toolsPrompt)
     
     let msgId: string = ''
     let chatId: string = request.chatId || ''
     
     if (chatId) {
-      console.log('[MiniMax] Using existing chat:', chatId)
       const sendResponse = await this.request('POST', '/matrix/api/v1/chat/send_msg', {
         ...requestBody,
         chat_id: chatId,
       }, deviceInfo)
-      
-      if (sendResponse.status !== 200) {
-        throw new Error(`MiniMax API error: HTTP ${sendResponse.status}`)
+      const { code, message } = parseMiniMaxError(sendResponse.data)
+      if (sendResponse.status !== 200 || code !== 0) {
+        throw new Error(`MiniMax send_msg failed (HTTP ${sendResponse.status}, code ${code ?? 'unknown'}): ${message || 'Unknown error'}`)
       }
-      
-      const { msg_id, base_resp } = sendResponse.data
-      if (base_resp?.status_code !== 0) {
-        throw new Error(`Send message failed: ${base_resp?.status_msg || 'Unknown error'}`)
-      }
+      const { msg_id } = sendResponse.data
       msgId = msg_id
     } else {
       const sendResponse = await this.request('POST', '/matrix/api/v1/chat/send_msg', requestBody, deviceInfo)
-      
-      console.log('[MiniMax] Send response status:', sendResponse.status)
-      
-      if (sendResponse.status !== 200) {
-        console.error('[MiniMax] Error response:', JSON.stringify(sendResponse.data))
-        throw new Error(`MiniMax API error: HTTP ${sendResponse.status} - ${JSON.stringify(sendResponse.data)}`)
-      }
-      
       const result = sendResponse.data
-      const base_resp = result.base_resp
-      
-      if (base_resp?.status_code !== 0) {
-        throw new Error(`Send message failed: ${base_resp?.status_msg || 'Unknown error'}`)
+      const { code, message } = parseMiniMaxError(result)
+      if (sendResponse.status !== 200 || code !== 0) {
+        throw new Error(`MiniMax send_msg failed (HTTP ${sendResponse.status}, code ${code ?? 'unknown'}): ${message || 'Unknown error'}`)
       }
-      
       chatId = result.chat_id
       msgId = result.msg_id
-      console.log('[MiniMax] Message sent, chat_id:', chatId, 'msg_id:', msgId)
     }
     
     if (request.stream === true) {

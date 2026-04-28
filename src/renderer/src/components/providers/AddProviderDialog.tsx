@@ -315,7 +315,7 @@ export function AddProviderDialog({
       apiEndpoint: 'https://agent.minimaxi.com',
       enabled: true,
       description: t('minimax.description'),
-      supportedModels: ['MiniMax-M2.5'],
+      supportedModels: ['MiniMax-M2.7'],
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
