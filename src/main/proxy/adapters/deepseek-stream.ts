@@ -18,6 +18,10 @@ interface StreamChunk {
   v?: any
   response_message_id?: string
   o?: string
+  type?: string
+  content?: string
+  clear_response?: boolean
+  finish_reason?: string
 }
 
 type FragmentKind = 'thinking' | 'content' | ''
@@ -41,6 +45,7 @@ export class DeepSeekStreamHandler {
   private upstreamDataLineIndex: number = 0
   private streamVisibleContentLength: number = 0
   private streamThinkingContentLength: number = 0
+  private upstreamFinishReason: string | null = null
 
   constructor(
     model: string,
@@ -248,6 +253,7 @@ export class DeepSeekStreamHandler {
     isSearchSilentModel: boolean
   ): void {
     let handledFragments = false
+    let hasEmittedContent = false
 
     if (chunk.response_message_id && !this.messageId) {
       this.messageId = chunk.response_message_id
@@ -264,6 +270,7 @@ export class DeepSeekStreamHandler {
           }
           if (fragment?.content && kind) {
             this.sendContent(fragment.content, kind, transStream, isSilentModel, isFoldModel, isSearchSilentModel)
+            hasEmittedContent = true
           }
         }
       }
@@ -277,6 +284,7 @@ export class DeepSeekStreamHandler {
           }
           if (fragment?.content && kind) {
             this.sendContent(fragment.content, kind, transStream, isSilentModel, isFoldModel, isSearchSilentModel)
+            hasEmittedContent = true
           }
         }
       }
@@ -314,7 +322,20 @@ export class DeepSeekStreamHandler {
       content = this.extractTextFromValue(chunk.v)
     }
 
-    if (!content) return
+    const topLevelContent = typeof chunk.content === 'string'
+      ? this.normalizeContent(chunk.content, isSearchSilentModel)
+      : ''
+    if (topLevelContent) {
+      this.sendContent(topLevelContent, 'content', transStream, isSilentModel, isFoldModel, isSearchSilentModel)
+      hasEmittedContent = true
+    }
+
+    if (!content) {
+      if (typeof chunk.finish_reason === 'string') {
+        this.upstreamFinishReason = chunk.finish_reason
+      }
+      return
+    }
 
     // For thinking models, default to 'thinking' path if not set
     let effectivePath = this.currentPath
@@ -323,6 +344,11 @@ export class DeepSeekStreamHandler {
     }
 
     this.sendContent(content, effectivePath, transStream, isSilentModel, isFoldModel, isSearchSilentModel)
+    hasEmittedContent = true
+
+    if (typeof chunk.finish_reason === 'string' && (hasEmittedContent || topLevelContent)) {
+      this.upstreamFinishReason = chunk.finish_reason
+    }
   }
 
   private getFragmentKind(fragmentType: unknown): FragmentKind {
@@ -458,7 +484,9 @@ export class DeepSeekStreamHandler {
     }
 
     // Determine finish_reason based on whether we had tool calls
-    const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
+    const finishReason = this.toolCallState.hasEmittedToolCall
+      ? 'tool_calls'
+      : (this.upstreamFinishReason || 'stop')
 
     transStream.write(this.createChunk({}, finishReason))
     transStream.write('data: [DONE]\n\n')
@@ -595,11 +623,6 @@ export class DeepSeekStreamHandler {
               }
             }
 
-            // For thinking models, default to 'thinking' path if not set
-            if (!currentPath && isThinkingModel) {
-              currentPath = 'thinking'
-            }
-            
             // For fold models (web search only), default to 'content' path if not set
             if (!currentPath && isFoldModel) {
               currentPath = 'content'
@@ -613,8 +636,20 @@ export class DeepSeekStreamHandler {
               })
             }
 
-            const extractedText = handledFragments || !this.shouldExtractChunkText(parsed) ? '' : this.normalizeContent(this.extractTextFromValue(parsed.v), isSearchSilentModel)
+            const topLevelContent = typeof parsed.content === 'string'
+              ? this.normalizeContent(parsed.content, isSearchSilentModel)
+              : ''
+            if (topLevelContent) {
+              accumulatedContent += topLevelContent
+            }
+
+            const extractedText = handledFragments || !this.shouldExtractChunkText(parsed)
+              ? ''
+              : this.normalizeContent(this.extractTextFromValue(parsed.v), isSearchSilentModel)
             if (extractedText) {
+              if (!currentPath && isThinkingModel) {
+                currentPath = 'thinking'
+              }
               if (currentPath === 'thinking') {
                 accumulatedThinkingContent += extractedText
               } else {
