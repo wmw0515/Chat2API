@@ -112,6 +112,9 @@ interface DeviceInfo {
   uuid: string // Device registration uuid
 }
 
+type MiniMaxUserIdSource = 'configuredRealUserID' | 'parsedJwt' | 'deviceInfo'
+type MiniMaxUuidSource = 'configured' | 'existing'
+
 interface CreditInfo {
   totalCredits: number
   usedCredits: number
@@ -129,48 +132,6 @@ interface ChatListItem {
 const deviceInfoMap = new Map<string, DeviceInfo>()
 const DEVICE_INFO_EXPIRES = 10800
 const MINIMAX_SEND_DEBUG = process.env.CHAT2API_MINIMAX_SEND_DEBUG === '1'
-
-function sanitizeCookieHeaderValue(input: unknown): string {
-  if (typeof input !== 'string') {
-    return ''
-  }
-
-  const normalized = input
-    .replace(/^Cookie:\s*/i, '')
-    .replace(/[\r\n\t]+/g, ' ')
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .replace(/[^\x20-\x7E]/g, '')
-    .replace(/\s*;\s*/g, ';')
-    .trim()
-
-  if (!normalized) {
-    return ''
-  }
-
-  const cookiePairs = normalized
-    .split(';')
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .filter((segment) => segment.includes('='))
-    .map((segment) => {
-      const separatorIndex = segment.indexOf('=')
-      const rawName = segment.slice(0, separatorIndex).trim()
-      const rawValue = segment.slice(separatorIndex + 1).trim()
-      const name = rawName.replace(/[^\x21-\x7E]/g, '')
-      const value = rawValue.replace(/[^\x20-\x7E]/g, '')
-      if (!name) {
-        return ''
-      }
-      return `${name}=${value}`
-    })
-    .filter(Boolean)
-
-  return cookiePairs.join('; ')
-}
-
-function hasInvalidCookieHeaderChars(value: string): boolean {
-  return /[\r\n\u0000-\u001F\u007F]|[^\x20-\x7E]/.test(value)
-}
 
 function normalizeMiniMaxChatId(rawValue: unknown): string | number | undefined {
   if (rawValue === undefined || rawValue === null) {
@@ -204,10 +165,12 @@ function summarizeMiniMaxSendMsgRequest(
   headers: Record<string, string>,
   data: any,
   configuredChatId?: string | number,
-  cookieDiagnostics?: {
-    rawCookieLength: number
-    sanitizedCookieLength: number
-    cookieHadInvalidHeaderChars: boolean
+  diagnostics?: {
+    hasConfiguredWebUuid: boolean
+    uuidSource: MiniMaxUuidSource
+    userIdSource: MiniMaxUserIdSource
+    hasRawCookie: boolean
+    cookieSuppressedByDefault: boolean
   }
 ): Record<string, any> {
   const queryKeys = Object.keys(userData).filter((key) => userData[key] !== undefined && userData[key] !== null)
@@ -218,9 +181,11 @@ function summarizeMiniMaxSendMsgRequest(
     method,
     path: uri,
     queryKeys,
-    rawCookieLength: cookieDiagnostics?.rawCookieLength ?? 0,
-    sanitizedCookieLength: cookieDiagnostics?.sanitizedCookieLength ?? cookieHeader.length,
-    cookieHadInvalidHeaderChars: cookieDiagnostics?.cookieHadInvalidHeaderChars ?? false,
+    hasConfiguredWebUuid: diagnostics?.hasConfiguredWebUuid ?? false,
+    uuidSource: diagnostics?.uuidSource ?? 'existing',
+    userIdSource: diagnostics?.userIdSource ?? 'deviceInfo',
+    hasRawCookie: diagnostics?.hasRawCookie ?? false,
+    cookieSuppressedByDefault: diagnostics?.cookieSuppressedByDefault ?? false,
     hasTokenInQuery: Boolean(tokenInQuery),
     tokenLength: tokenInQuery.length,
     hasCookieHeader: Boolean(cookieHeader),
@@ -362,7 +327,9 @@ export class MiniMaxAdapter {
   private rawToken: string
   private jwtToken: string
   private realUserID: string
+  private realUserIdSource: MiniMaxUserIdSource
   private rawCookies: unknown
+  private configuredWebUuid?: string
   private configuredChatId?: string | number
   private model: string
   private created: number
@@ -372,6 +339,9 @@ export class MiniMaxAdapter {
     this.account = account
     this.rawToken = account.credentials.token || ''
     this.rawCookies = account.credentials.cookies
+    this.configuredWebUuid = typeof account.credentials.webUuid === 'string' && account.credentials.webUuid.trim()
+      ? account.credentials.webUuid.trim()
+      : undefined
     this.configuredChatId = normalizeMiniMaxChatId(account.credentials.chatId)
     if (account.credentials.chatId !== undefined && this.configuredChatId === undefined) {
       console.warn('[MiniMax] Ignoring invalid chatId credential: expected numeric or numeric string')
@@ -385,6 +355,7 @@ export class MiniMaxAdapter {
     if (providedRealUserID && providedRealUserID.trim()) {
       // User provided realUserID separately, use it directly
       this.realUserID = providedRealUserID.trim()
+      this.realUserIdSource = 'configuredRealUserID'
       this.jwtToken = this.rawToken
     } else {
       // No separate realUserID, check if token is in realUserID+JWTtoken format
@@ -395,11 +366,13 @@ export class MiniMaxAdapter {
       if (fullToken.includes('+')) {
         const parts = fullToken.split('+')
         this.realUserID = parts[0]
+        this.realUserIdSource = 'parsedJwt'
         this.jwtToken = parts[1]
       } else {
         // Just JWT token, parse userID from it
         this.jwtToken = fullToken
         this.realUserID = parseJWTUserID(this.jwtToken)
+        this.realUserIdSource = 'parsedJwt'
       }
     }
   }
@@ -512,8 +485,17 @@ export class MiniMaxAdapter {
     deviceInfo: DeviceInfo
   ): Promise<AxiosResponse> {
     const userData = { ...WEB_QUERY_BASE }
-    const realUserID = deviceInfo.realUserID || deviceInfo.userId
-    userData.uuid = deviceInfo.uuid || uuid()
+    const resolvedUserIdFromDevice = deviceInfo.realUserID || deviceInfo.userId
+    const hasConfiguredRealUserId = Boolean(this.account.credentials.realUserID && String(this.account.credentials.realUserID).trim())
+    const realUserID = hasConfiguredRealUserId
+      ? this.realUserID
+      : (this.realUserID || resolvedUserIdFromDevice)
+    const userIdSource: MiniMaxUserIdSource = hasConfiguredRealUserId
+      ? 'configuredRealUserID'
+      : (this.realUserID ? this.realUserIdSource : 'deviceInfo')
+    const resolvedUuid = this.configuredWebUuid || deviceInfo.uuid || uuid()
+    const uuidSource: MiniMaxUuidSource = this.configuredWebUuid ? 'configured' : 'existing'
+    userData.uuid = resolvedUuid
     userData.device_id = deviceInfo.deviceId || undefined
     userData.user_id = realUserID
     userData.unix = `${Date.now()}`
@@ -526,19 +508,16 @@ export class MiniMaxAdapter {
       'Content-Type': 'application/json',
     }
     const rawCookie = typeof this.rawCookies === 'string' ? this.rawCookies : ''
-    const sanitizedCookie = sanitizeCookieHeaderValue(rawCookie)
-    const cookieHadInvalidHeaderChars = hasInvalidCookieHeaderChars(rawCookie)
-    if (sanitizedCookie && !hasInvalidCookieHeaderChars(sanitizedCookie)) {
-      requestHeaders.Cookie = sanitizedCookie
-    }
 
     if (MINIMAX_SEND_DEBUG) {
       console.log(
         '[MiniMax][send_msg][request]',
         summarizeMiniMaxSendMsgRequest(method, uri, userData, requestHeaders, data, this.configuredChatId, {
-          rawCookieLength: rawCookie.length,
-          sanitizedCookieLength: sanitizedCookie.length,
-          cookieHadInvalidHeaderChars,
+          hasConfiguredWebUuid: Boolean(this.configuredWebUuid),
+          uuidSource,
+          userIdSource,
+          hasRawCookie: Boolean(rawCookie.trim()),
+          cookieSuppressedByDefault: true,
         })
       )
     }

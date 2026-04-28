@@ -598,6 +598,11 @@ function CredentialFieldsForm({ fields, credentials, onChange, t, providerId }: 
           placeholder: t('minimax.cookiesPlaceholder'),
           helpText: t('minimax.cookiesHelp'),
         },
+        webUuid: {
+          label: t('minimax.webUuid'),
+          placeholder: t('minimax.webUuidPlaceholder'),
+          helpText: t('minimax.webUuidHelp'),
+        },
         chatId: {
           label: t('minimax.chatId'),
           placeholder: t('minimax.chatIdPlaceholder'),
