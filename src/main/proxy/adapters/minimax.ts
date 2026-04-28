@@ -57,6 +57,22 @@ const WEB_QUERY_BASE: Record<string, any> = {
   client: 'web',
 }
 
+const LEGACY_QUERY_BASE: Record<string, any> = {
+  device_platform: 'web',
+  biz_id: '3',
+  app_id: '3001',
+  version_code: '22201',
+  os_name: 'Mac',
+  browser_name: 'chrome',
+  device_memory: 8,
+  cpu_core_num: 11,
+  browser_language: 'zh-CN',
+  browser_platform: 'MacIntel',
+  screen_width: 1920,
+  screen_height: 1080,
+  lang: 'zh',
+}
+
 const DEFAULT_SUB_AGENT_IDS = [
   340123961561242,
   340123961561243,
@@ -188,6 +204,13 @@ function checkResult(result: AxiosResponse): any {
   throw new Error(`[请求hailuo失败]: ${message}`)
 }
 
+function buildQuery(userData: Record<string, any>): string {
+  return Object.keys(userData)
+    .filter((key) => userData[key] !== undefined && userData[key] !== null)
+    .map((key) => `${key}=${userData[key]}`)
+    .join('&')
+}
+
 export class MiniMaxAdapter {
   private provider: Provider
   private account: Account
@@ -241,18 +264,13 @@ export class MiniMaxAdapter {
     const unix = `${Date.now()}`
     const timestamp = unixTimestamp()
     
-    const userData = { ...WEB_QUERY_BASE }
+    const userData = { ...LEGACY_QUERY_BASE }
     userData.uuid = randomUuid
+    userData.device_id = undefined
     userData.user_id = this.realUserID
     userData.unix = unix
     userData.token = this.jwtToken
-    
-    let queryStr = ''
-    for (const key in userData) {
-      if (userData[key] === undefined) continue
-      queryStr += `&${key}=${userData[key]}`
-    }
-    queryStr = queryStr.substring(1)
+    const queryStr = buildQuery(userData)
     
     const dataJson = JSON.stringify({ uuid: randomUuid })
     const fullUri = `/v1/api/user/device/register?${queryStr}`
@@ -296,7 +314,46 @@ export class MiniMaxAdapter {
     return result
   }
 
-  private async request(
+  private async requestLegacySigned(
+    method: string,
+    uri: string,
+    data: any,
+    deviceInfo: DeviceInfo
+  ): Promise<AxiosResponse> {
+    const userData = { ...LEGACY_QUERY_BASE }
+    const realUserID = deviceInfo.realUserID || deviceInfo.userId
+    userData.uuid = deviceInfo.uuid || uuid()
+    userData.device_id = deviceInfo.deviceId || undefined
+    userData.user_id = realUserID
+    const unix = `${Date.now()}`
+    const timestamp = unixTimestamp()
+    userData.unix = unix
+    userData.token = this.jwtToken
+    const queryStr = buildQuery(userData)
+    const fullUri = `${uri}${uri.lastIndexOf('?') != -1 ? '&' : '?'}${queryStr}`
+    const dataJson = JSON.stringify(data || {})
+    const yy = md5(`${encodeURIComponent(fullUri)}_${dataJson}${md5(unix)}ooui`)
+    const signature = md5(`${timestamp}${this.jwtToken}${dataJson}`)
+
+    return await axios.request({
+      method,
+      url: `${AGENT_BASE_URL}${fullUri}`,
+      data,
+      timeout: 15000,
+      validateStatus: () => true,
+      headers: {
+        Referer: `${AGENT_BASE_URL}/`,
+        ...FAKE_HEADERS,
+        'Content-Type': 'application/json',
+        token: this.jwtToken,
+        'x-timestamp': String(timestamp),
+        'x-signature': signature,
+        yy,
+      },
+    })
+  }
+
+  private async requestWebSendMsg(
     method: string,
     uri: string,
     data: any,
@@ -309,14 +366,7 @@ export class MiniMaxAdapter {
     userData.user_id = realUserID
     userData.unix = `${Date.now()}`
     userData.token = this.jwtToken
-    
-    let queryStr = ''
-    for (const key in userData) {
-      if (userData[key] === undefined) continue
-      queryStr += `&${key}=${userData[key]}`
-    }
-    queryStr = queryStr.substring(1)
-    
+    const queryStr = buildQuery(userData)
     const fullUri = `${uri}${uri.lastIndexOf('?') != -1 ? '&' : '?'}${queryStr}`
 
     return await axios.request({
@@ -331,70 +381,6 @@ export class MiniMaxAdapter {
         'Content-Type': 'application/json',
       },
     })
-  }
-
-  private async requestStream(
-    method: string,
-    uri: string,
-    requestBody: any,
-    deviceInfo: DeviceInfo
-  ): Promise<{ session: ClientHttp2Session; stream: ClientHttp2Stream }> {
-    const userData = { ...WEB_QUERY_BASE }
-    const realUserID = deviceInfo.realUserID || deviceInfo.userId
-    userData.uuid = deviceInfo.uuid || uuid()
-    userData.device_id = deviceInfo.deviceId || undefined
-    userData.user_id = realUserID
-    userData.unix = `${Date.now()}`
-    userData.token = this.jwtToken
-
-    let queryStr = ''
-    for (const key in userData) {
-      if (userData[key] === undefined) continue
-      queryStr += `&${key}=${userData[key]}`
-    }
-    queryStr = queryStr.substring(1)
-
-    const dataJson = JSON.stringify(requestBody)
-
-    const session = await new Promise<ClientHttp2Session>((resolve, reject) => {
-      const session = http2.connect(AGENT_BASE_URL)
-      session.on('connect', () => resolve(session))
-      session.on('error', reject)
-    })
-
-    const headers: any = {
-      ':method': method,
-      ':path': `${uri}?${queryStr}`,
-      ':scheme': 'https',
-      'content-type': 'application/json',
-      Referer: 'https://agent.minimaxi.com/',
-      ...FAKE_HEADERS,
-      Accept: 'text/event-stream',
-    }
-
-    const stream = session.request(headers)
-    stream.setTimeout(120000)
-    stream.setEncoding('utf8')
-
-    stream.on('response', (respHeaders) => {
-      console.log('[MiniMax] HTTP/2 response headers:', JSON.stringify(respHeaders))
-    })
-
-    stream.on('data', (chunk) => {
-      console.log('[MiniMax] HTTP/2 data chunk:', chunk.toString().substring(0, 200))
-    })
-
-    stream.on('error', (err) => {
-      console.error('[MiniMax] HTTP/2 stream error:', err)
-    })
-
-    stream.on('close', () => {
-      console.log('[MiniMax] HTTP/2 stream closed')
-    })
-
-    stream.end(Buffer.from(dataJson, 'utf8'))
-
-    return { session, stream }
   }
 
   private resolveModelOption(model: string): { display_name: string; model_type: number } {
@@ -458,7 +444,7 @@ export class MiniMaxAdapter {
     let chatId: string = request.chatId || ''
     
     if (chatId) {
-      const sendResponse = await this.request('POST', '/matrix/api/v1/chat/send_msg', {
+      const sendResponse = await this.requestWebSendMsg('POST', '/matrix/api/v1/chat/send_msg', {
         ...requestBody,
         chat_id: chatId,
       }, deviceInfo)
@@ -469,7 +455,7 @@ export class MiniMaxAdapter {
       const { msg_id } = sendResponse.data
       msgId = msg_id
     } else {
-      const sendResponse = await this.request('POST', '/matrix/api/v1/chat/send_msg', requestBody, deviceInfo)
+      const sendResponse = await this.requestWebSendMsg('POST', '/matrix/api/v1/chat/send_msg', requestBody, deviceInfo)
       const result = sendResponse.data
       const { code, message } = parseMiniMaxError(result)
       if (sendResponse.status !== 200 || code !== 0) {
@@ -549,7 +535,7 @@ export class MiniMaxAdapter {
       await new Promise(resolve => setTimeout(resolve, pollInterval))
       pollCount++
       
-      const detailResponse = await this.request('POST', '/matrix/api/v1/chat/get_chat_detail', { chat_id: chatId }, deviceInfo)
+      const detailResponse = await this.requestLegacySigned('POST', '/matrix/api/v1/chat/get_chat_detail', { chat_id: chatId }, deviceInfo)
       
       if (detailResponse.status !== 200) {
         console.log('[MiniMax] Poll failed, status:', detailResponse.status)
@@ -594,7 +580,7 @@ export class MiniMaxAdapter {
           await new Promise(resolve => setTimeout(resolve, pollInterval))
           pollCount++
           
-          const detailResponse = await this.request('POST', '/matrix/api/v1/chat/get_chat_detail', { chat_id: chatId }, deviceInfo)
+          const detailResponse = await this.requestLegacySigned('POST', '/matrix/api/v1/chat/get_chat_detail', { chat_id: chatId }, deviceInfo)
           
           if (detailResponse.status !== 200) {
             console.log('[MiniMax] Poll status:', detailResponse.status)
@@ -745,7 +731,7 @@ export class MiniMaxAdapter {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const deviceInfo = await this.requestDeviceInfo()
-        const response = await this.request('POST', '/matrix/api/v1/chat/delete_chat', { chat_id: parseInt(chatId, 10) }, deviceInfo)
+        const response = await this.requestLegacySigned('POST', '/matrix/api/v1/chat/delete_chat', { chat_id: parseInt(chatId, 10) }, deviceInfo)
         console.log('[MiniMax] Chat deleted attempt', attempt, ':', chatId, 'Status:', response.status, 'Response:', JSON.stringify(response.data))
         
         if (response.status === 200 && response.data?.base_resp?.status_code === 0) {
@@ -777,7 +763,7 @@ export class MiniMaxAdapter {
 
   async getUserInfo(): Promise<any> {
     const deviceInfo = await this.requestDeviceInfo()
-    const response = await this.request('GET', '/v1/api/user/info', {}, deviceInfo)
+    const response = await this.requestLegacySigned('GET', '/v1/api/user/info', {}, deviceInfo)
     if (response.status !== 200 || response.data?.statusInfo?.code !== 0) {
       throw new Error(`Failed to get user info: ${response.data?.statusInfo?.message || response.status}`)
     }
@@ -788,7 +774,7 @@ export class MiniMaxAdapter {
     try {
       const deviceInfo = await this.requestDeviceInfo()
       
-      const response = await this.request('POST', '/matrix/api/v1/commerce/get_membership_info', {}, deviceInfo)
+      const response = await this.requestLegacySigned('POST', '/matrix/api/v1/commerce/get_membership_info', {}, deviceInfo)
       
       console.log('[MiniMax] get_membership_info status:', response.status)
       
@@ -843,7 +829,7 @@ export class MiniMaxAdapter {
           requestBody.next_page_index_id = nextPageIndexId
         }
         
-        const response = await this.request('POST', '/matrix/api/v1/chat/list_chat', requestBody, deviceInfo)
+        const response = await this.requestLegacySigned('POST', '/matrix/api/v1/chat/list_chat', requestBody, deviceInfo)
         
         console.log('[MiniMax] list_chat response status:', response.status)
         
