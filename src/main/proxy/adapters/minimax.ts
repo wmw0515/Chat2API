@@ -135,17 +135,41 @@ function sanitizeCookieHeaderValue(input: unknown): string {
     return ''
   }
 
-  return input
+  const normalized = input
     .replace(/^Cookie:\s*/i, '')
     .replace(/[\r\n\t]+/g, ' ')
     .replace(/[\u0000-\u001F\u007F]/g, '')
-    .replace(/\s*;\s*/g, '; ')
-    .replace(/\s+/g, ' ')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/\s*;\s*/g, ';')
     .trim()
+
+  if (!normalized) {
+    return ''
+  }
+
+  const cookiePairs = normalized
+    .split(';')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .filter((segment) => segment.includes('='))
+    .map((segment) => {
+      const separatorIndex = segment.indexOf('=')
+      const rawName = segment.slice(0, separatorIndex).trim()
+      const rawValue = segment.slice(separatorIndex + 1).trim()
+      const name = rawName.replace(/[^\x21-\x7E]/g, '')
+      const value = rawValue.replace(/[^\x20-\x7E]/g, '')
+      if (!name) {
+        return ''
+      }
+      return `${name}=${value}`
+    })
+    .filter(Boolean)
+
+  return cookiePairs.join('; ')
 }
 
 function hasInvalidCookieHeaderChars(value: string): boolean {
-  return /[\r\n\u0000-\u001F\u007F]/.test(value)
+  return /[\r\n\u0000-\u001F\u007F]|[^\x20-\x7E]/.test(value)
 }
 
 function normalizeMiniMaxChatId(rawValue: unknown): string | number | undefined {
