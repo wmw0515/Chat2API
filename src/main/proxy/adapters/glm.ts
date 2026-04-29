@@ -27,6 +27,18 @@ const DEFAULT_ASSISTANT_ID = '65940acff94777010aa6b796'
 const SIGN_SECRET = '8a1317a7468aa3ad86e997d08f3f31cb'
 const ACCESS_TOKEN_EXPIRES = 3600
 const FILE_MAX_SIZE = 100 * 1024 * 1024 // 100MB
+const GLM_TRIAL_WEB_SEARCH_TOOL = {
+  type: 'web_search',
+  web_search: {
+    search_engine: 'search_std',
+    search_recency_filter: 'noLimit',
+    count: 10,
+    search_intent: false,
+    search_domain_filter: '',
+    content_size: 'medium',
+  },
+  extraMcpData: [],
+}
 
 const FAKE_HEADERS = {
   Accept: 'text/event-stream',
@@ -62,6 +74,7 @@ interface TokenInfo {
 interface GLMMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string | any[] | null
+  reasoning_content?: string
   tool_call_id?: string
   tool_calls?: any[]
 }
@@ -447,6 +460,20 @@ GLM STRICT RULES:
     }
 
     const preparedMessages = this.messagesToPrompt(messages, refs, toolsPrompt, false)
+    const promptMessages = preparedMessages
+      .map((m: any) => {
+        const content = Array.isArray(m.content) ? m.content.map((c: any) => c.text || '').join('') : m.content
+        if (m.role === 'user') return { role: 'user', content, fileContentList: [] as any[] }
+        if (m.role === 'assistant') {
+          const mappedAssistant: any = { role: 'assistant', content }
+          if (typeof m.reasoning_content === 'string' && m.reasoning_content.length > 0) {
+            mappedAssistant.reasoning_content = m.reasoning_content
+          }
+          return mappedAssistant
+        }
+        return null
+      })
+      .filter(Boolean)
 
     let assistantId = DEFAULT_ASSISTANT_ID
     let chatMode = ''
@@ -488,18 +515,35 @@ GLM STRICT RULES:
 
     console.log('[GLM] Sending chat request...')
     
+    const runtimeBody = {
+      model: 'glm-5.1',
+      modelId: 11989,
+      stream: true,
+      thinking: { type: 'enabled' },
+      max_tokens: 65536,
+      temperature: request.temperature ?? 1,
+      top_p: request.top_p ?? 0.95,
+      tools: [GLM_TRIAL_WEB_SEARCH_TOOL],
+      prompt: promptMessages,
+    }
+
+    if (process.env.CHAT2API_GLM_SSE_DEBUG === '1') {
+      const lastUser = [...promptMessages].reverse().find((p: any) => p.role === 'user')
+      console.log('[GLM SSE DEBUG] Request body summary:', JSON.stringify({
+        has_tools: Array.isArray(runtimeBody.tools) && runtimeBody.tools.length > 0,
+        tools_length: Array.isArray(runtimeBody.tools) ? runtimeBody.tools.length : 0,
+        has_thinking: Boolean(runtimeBody.thinking),
+        prompt_length: Array.isArray(runtimeBody.prompt) ? runtimeBody.prompt.length : 0,
+        last_user_text_length: typeof lastUser?.content === 'string' ? lastUser.content.length : 0,
+        model: runtimeBody.model,
+        modelId: runtimeBody.modelId,
+        stream: runtimeBody.stream,
+      }))
+    }
+
     const response = await axios.post(
       `${GLM_API_BASE}/biz/trial/response/v4/sse/11989`,
-      {
-        model: 'glm-5.1',
-        modelId: 11989,
-        stream: true,
-        thinking: { type: 'enabled' },
-        max_tokens: 65536,
-        temperature: request.temperature ?? 1,
-        top_p: 0.95,
-        prompt: preparedMessages.map((m: any) => ({ role: m.role, content: Array.isArray(m.content) ? m.content.map((c: any) => c.text || '').join('') : m.content, fileContentList: [] })),
-      },
+      runtimeBody,
       {
         headers: {
           Authorization: authorization,
