@@ -1025,7 +1025,9 @@
     "source.manual": "manual",
     "source.discovered": "discovered",
     "confirmReset": "Are you sure you want to reset to default? This will remove all custom models and exclusion settings.",
-    "confirmDelete": "Are you sure you want to delete this model?"
+    "confirmDelete": "Are you sure you want to delete this model?",
+    "noActiveAccountForHealthCheck": "No active account with credentials available for health check",
+    "noActiveAccountForModelSync": "No active account with credentials found for model sync"
   },
   "about": {
     "tagline": "Multi-platform AI Service Unified Management Tool",

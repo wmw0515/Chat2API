@@ -1025,7 +1025,9 @@
     "source.manual": "手动",
     "source.discovered": "发现",
     "confirmReset": "确定要恢复默认模型吗？这将删除所有自定义模型和排除设置。",
-    "confirmDelete": "确定要删除此模型吗？"
+    "confirmDelete": "确定要删除此模型吗？",
+    "noActiveAccountForHealthCheck": "没有可用于健康检测的有效账户凭证",
+    "noActiveAccountForModelSync": "没有可用于同步模型的有效账户凭证"
   },
   "about": {
     "tagline": "多平台 AI 服务统一管理工具",
