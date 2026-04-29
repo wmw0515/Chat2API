@@ -658,15 +658,86 @@ export class GLMStreamHandler {
   private created: number
   private onEnd?: () => void
   private toolCallState: ToolCallState
+  private readonly sseDebugEnabled: boolean
+  private readonly sseDebugMaxEvents: number = 20
 
   constructor(model: string, onEnd?: () => void, initialConversationId?: string) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
     this.toolCallState = createToolCallState()
+    this.sseDebugEnabled = process.env.CHAT2API_GLM_SSE_DEBUG === '1'
     if (initialConversationId) {
       this.conversationId = initialConversationId
     }
+  }
+
+  private isObject(v: any): v is Record<string, any> {
+    return !!v && typeof v === 'object' && !Array.isArray(v)
+  }
+
+  private pickString(obj: any, path: string[]): string {
+    let cur = obj
+    for (const key of path) {
+      if (cur == null) return ''
+      cur = cur[key]
+    }
+    return typeof cur === 'string' ? cur : ''
+  }
+
+  private extractCommonFields(payload: any): { content: string; reasoning: string; done: boolean } {
+    const contentPaths: string[][] = [
+      ['content'], ['text'], ['delta'], ['message', 'content'], ['data', 'content'], ['data', 'text'], ['data', 'delta'],
+      ['data', 'message', 'content'], ['result', 'content'], ['result', 'text'], ['result', 'delta'],
+      ['choices', '0', 'delta', 'content'], ['choices', '0', 'message', 'content'],
+    ]
+    const reasoningPaths: string[][] = [
+      ['reasoning_content'], ['reasoning'], ['thought'], ['thinking'], ['data', 'reasoning_content'],
+      ['data', 'reasoning'], ['data', 'thought'], ['result', 'reasoning_content'],
+    ]
+    let content = ''
+    let reasoning = ''
+    for (const p of contentPaths) {
+      const val = this.pickString(payload, p)
+      if (val) content += val
+    }
+    for (const p of reasoningPaths) {
+      const val = this.pickString(payload, p)
+      if (val) reasoning += val
+    }
+    const marker = typeof payload?.status === 'string' ? payload.status.toLowerCase() : ''
+    const done = payload?.done === true || !!payload?.finish_reason || ['finish', 'finished', 'done', 'close', 'complete'].includes(marker)
+    return { content, reasoning, done }
+  }
+
+  private logSseEventSummary(event: any, index: number, parseOk: boolean, parsed: any, contentHit: boolean, reasoningHit: boolean, doneHit: boolean): void {
+    if (!this.sseDebugEnabled || index > this.sseDebugMaxEvents) return
+    const topKeys = this.isObject(parsed) ? Object.keys(parsed) : []
+    const nestedKeys: Record<string, string[]> = {}
+    const stringLengths: Record<string, number> = {}
+    if (this.isObject(parsed)) {
+      Object.entries(parsed).forEach(([k, v]) => {
+        if (typeof v === 'string') stringLengths[k] = v.length
+        if (this.isObject(v)) {
+          nestedKeys[k] = Object.keys(v)
+          Object.entries(v).forEach(([k2, v2]) => {
+            if (typeof v2 === 'string') stringLengths[`${k}.${k2}`] = v2.length
+          })
+        }
+      })
+    }
+    console.log('[GLM SSE DEBUG] event_summary', JSON.stringify({
+      idx: index,
+      event: event.event || 'message',
+      raw_len: typeof event.data === 'string' ? event.data.length : 0,
+      parse_ok: parseOk,
+      top_keys: topKeys,
+      nested_keys_depth2: nestedKeys,
+      string_lengths: stringLengths,
+      has_content: contentHit,
+      has_reasoning: reasoningHit,
+      has_done_marker: doneHit || event.data === '[DONE]' || ['finish', 'done', 'close', 'complete'].includes((event.event || '').toLowerCase()),
+    }))
   }
 
   async handleStream(stream: any): Promise<PassThrough> {
@@ -689,7 +760,16 @@ export class GLMStreamHandler {
     const parser = createParser({
       onEvent: (event: any) => {
         try {
-          const result = JSON.parse(event.data)
+          let result: any = {}
+          let parseOk = false
+          if (event.data && event.data !== '[DONE]') {
+            try {
+              result = JSON.parse(event.data)
+              parseOk = true
+            } catch {}
+          }
+          const generic = this.extractCommonFields(result)
+          this.logSseEventSummary(event, cachedParts.length + 1, parseOk, result, !!generic.content, !!generic.reasoning, generic.done)
 
           if (!this.conversationId && result.conversation_id) {
             this.conversationId = result.conversation_id
@@ -787,6 +867,14 @@ export class GLMStreamHandler {
             if (chunk) {
               sentContent += chunk
             }
+            if (this.sseDebugEnabled && (chunk || reasoningChunk)) {
+              console.log('[GLM SSE DEBUG] stream_accumulated', JSON.stringify({
+                visible_len: sentContent.length,
+                reasoning_len: sentReasoning.length,
+                chunks_seen: cachedParts.length,
+                completion_detected: false,
+              }))
+            }
             
             // Process tool call interception - use toolCallState's buffer for accumulation
             const baseChunk = createBaseChunk(this.conversationId, this.model, this.created)
@@ -834,6 +922,14 @@ export class GLMStreamHandler {
               })}\n\n`
             )
             transStream.end('data: [DONE]\n\n')
+            if (this.sseDebugEnabled) {
+              console.log('[GLM SSE DEBUG] stream_final', JSON.stringify({
+                visible_len: sentContent.length,
+                reasoning_len: sentReasoning.length,
+                chunks_seen: cachedParts.length,
+                completion_detected: true,
+              }))
+            }
             this.onEnd?.()
           }
         } catch (err) {
@@ -899,11 +995,28 @@ export class GLMStreamHandler {
   async handleNonStream(stream: any): Promise<any> {
     return new Promise((resolve, reject) => {
       const cachedParts: any[] = []
+      let genericContent = ''
+      let genericReasoning = ''
+      let completionDetected = false
+      let eventCount = 0
 
       const parser = createParser({
         onEvent: (event: any) => {
           try {
-            const result = JSON.parse(event.data)
+            eventCount += 1
+            let result: any = {}
+            let parseOk = false
+            if (event.data && event.data !== '[DONE]') {
+              try {
+                result = JSON.parse(event.data)
+                parseOk = true
+              } catch {}
+            }
+            const generic = this.extractCommonFields(result)
+            if (generic.content) genericContent += generic.content
+            if (generic.reasoning) genericReasoning += generic.reasoning
+            completionDetected = completionDetected || generic.done || event.data === '[DONE]'
+            this.logSseEventSummary(event, eventCount, parseOk, result, !!generic.content, !!generic.reasoning, completionDetected)
 
             if (!this.conversationId && result.conversation_id) {
               this.conversationId = result.conversation_id
@@ -986,6 +1099,18 @@ export class GLMStreamHandler {
               })
 
               const { content: cleanContent, toolCalls } = parseToolCallsFromText(fullText, 'glm')
+              const finalContent = cleanContent.trim() || genericContent.trim()
+              if (this.sseDebugEnabled) {
+                console.log('[GLM SSE DEBUG] non_stream_final', JSON.stringify({
+                  visible_len: finalContent.length,
+                  reasoning_len: (fullReasoning || genericReasoning || '').length,
+                  chunks_seen: eventCount,
+                  completion_detected: completionDetected,
+                }))
+              }
+              if (!finalContent && toolCalls.length === 0) {
+                return reject(new Error('GLM returned no visible content. Enable CHAT2API_GLM_SSE_DEBUG=1 for safe SSE structure diagnostics.'))
+              }
 
               resolve({
                 id: this.conversationId,
@@ -996,8 +1121,8 @@ export class GLMStreamHandler {
                     index: 0,
                     message: {
                       role: 'assistant',
-                      content: toolCalls.length > 0 ? null : cleanContent.trim(),
-                      reasoning_content: fullReasoning || null,
+                      content: toolCalls.length > 0 ? null : finalContent,
+                      reasoning_content: fullReasoning || genericReasoning || null,
                       ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
                     },
                     finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
