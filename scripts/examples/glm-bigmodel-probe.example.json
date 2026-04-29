@@ -1,0 +1,26 @@
+{
+  "provider": "glm-bigmodel",
+  "request": {
+    "method": "POST",
+    "url": "https://bigmodel.cn/api/biz/trial/response/v4/sse/11989",
+    "headers": {
+      "authorization": "AUTHORIZATION_REDACTED",
+      "bigmodel-organization": "ORG_REDACTED",
+      "bigmodel-project": "PROJECT_REDACTED",
+      "cookie": "COOKIE_REDACTED",
+      "origin": "https://bigmodel.cn",
+      "referer": "https://bigmodel.cn/trialcenter/modeltrial/text?modelCode=glm-5.1",
+      "accept": "text/event-stream",
+      "content-type": "application/json"
+    },
+    "body": {
+      "model": "glm-5.1",
+      "modelId": 11989,
+      "stream": true,
+      "thinking": { "type": "enabled" },
+      "prompt": [
+        { "role": "user", "content": "只回复 glm-ok" }
+      ]
+    }
+  }
+}

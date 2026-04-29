@@ -1,603 +1,228 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs/promises'
-import { URL } from 'node:url'
 import { validateHeaderName, validateHeaderValue } from 'node:http'
+import { URL } from 'node:url'
 
 const DEFAULT_TIMEOUT_MS = 30000
-const MAX_PREVIEW_LENGTH = 24
+const STREAM_TIMEOUT_MS = 45000
+const DONE_MARKERS = ['[done]', 'event: done', '"done":true', '"finish_reason":"stop"']
 
 function printUsage() {
   console.log('Usage: node scripts/provider-probe.mjs <probe-input.json> [--show-prompt]')
 }
 
-function toLength(value) {
-  if (value === null || value === undefined) return 0
-  return String(value).length
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+const cloneJson = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)))
+const toLength = (v) => (v === null || v === undefined ? 0 : String(v).length)
+
+function tryParseJson(text) { try { return JSON.parse(text) } catch { return null } }
+function normalizeHeaderKey(k) { return String(k).toLowerCase() }
+
+function sanitizeCookie(raw) {
+  if (typeof raw !== 'string') return { present: false, valid: true, length: 0 }
+  const value = raw.split(';').map((x) => x.trim()).filter(Boolean).join('; ')
+  if (!value) return { present: false, valid: false, length: 0, reason: 'empty_after_sanitize' }
+  try { validateHeaderValue('cookie', value); return { present: true, valid: true, length: value.length, value } } catch { return { present: true, valid: false, length: value.length, reason: 'invalid_cookie_value' } }
 }
 
-function tryParseJson(text) {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return null
+function validateHeaders(headers) {
+  const valid = {}
+  const skipped = []
+  for (const [rawKey, rawVal] of Object.entries(headers || {})) {
+    const key = normalizeHeaderKey(rawKey)
+    if (typeof rawVal !== 'string') continue
+    let val = rawVal
+    if (key === 'cookie') {
+      const c = sanitizeCookie(rawVal)
+      if (!c.valid || !c.value) { skipped.push({ key, reason: c.reason || 'invalid_cookie' }); continue }
+      val = c.value
+    }
+    try {
+      validateHeaderName(key)
+      validateHeaderValue(key, val)
+      valid[key] = val
+    } catch {
+      skipped.push({ key, reason: 'invalid_header_value' })
+    }
   }
+  return { validHeaders: valid, skipped }
 }
 
-function isObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
+function getByPath(obj, path) {
+  const parts = path.split('.')
+  let cur = obj
+  for (const p of parts) {
+    if (cur === null || cur === undefined) return undefined
+    cur = cur[p]
+  }
+  return cur
+}
+function deleteByPath(obj, path) {
+  const parts = path.split('.')
+  let cur = obj
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    if (cur === null || cur === undefined) return false
+    cur = cur[parts[i]]
+  }
+  if (cur && Object.prototype.hasOwnProperty.call(cur, parts[parts.length - 1])) {
+    delete cur[parts[parts.length - 1]]
+    return true
+  }
+  return false
+}
+function deepMerge(target, src) {
+  if (!isObject(src)) return target
+  for (const [k, v] of Object.entries(src)) {
+    if (isObject(v) && isObject(target[k])) deepMerge(target[k], v)
+    else target[k] = cloneJson(v)
+  }
+  return target
 }
 
-function cloneJson(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value))
+function applyVariant(base, variant) {
+  const out = { method: base.method, urlObj: new URL(base.urlObj.toString()), headers: { ...base.headers }, body: cloneJson(base.body) }
+  for (const key of variant.removeHeaders || []) delete out.headers[normalizeHeaderKey(key)]
+  if (isObject(variant.setHeaders)) {
+    for (const [k, v] of Object.entries(variant.setHeaders)) if (typeof v === 'string') out.headers[normalizeHeaderKey(k)] = v
+  }
+  for (const key of variant.removeQuery || []) out.urlObj.searchParams.delete(key)
+  if (isObject(variant.setQuery)) for (const [k, v] of Object.entries(variant.setQuery)) out.urlObj.searchParams.set(k, String(v))
+  if (isObject(variant.replaceBody)) out.body = cloneJson(variant.replaceBody)
+  for (const path of variant.removeBodyPaths || []) if (typeof path === 'string' && isObject(out.body)) deleteByPath(out.body, path)
+  for (const key of variant.removeBodyTopLevelKeys || []) if (isObject(out.body)) delete out.body[key]
+  if (isObject(variant.setBody)) {
+    if (!isObject(out.body)) out.body = {}
+    deepMerge(out.body, variant.setBody)
+  }
+  return out
 }
 
-function readPromptPreview(text, allowFullPrompt) {
-  if (typeof text !== 'string') {
-    return { present: false }
-  }
-
-  if (allowFullPrompt) {
-    return { present: true, full: text }
-  }
-
-  const preview = text.slice(0, MAX_PREVIEW_LENGTH)
-  return {
-    present: true,
-    preview,
-    redacted: text.length > MAX_PREVIEW_LENGTH ? `${preview}…` : preview,
-    totalLength: text.length,
-  }
+function buildAutoVariants(input) {
+  const variants = []
+  const headers = Object.fromEntries(Object.entries(input.request.headers || {}).map(([k, v]) => [normalizeHeaderKey(k), v]))
+  const urlObj = new URL(input.request.url)
+  const body = isObject(input.request.body) ? input.request.body : {}
+  if (headers.cookie) variants.push({ name: 'without_cookie', removeHeaders: ['cookie'] })
+  if (headers.authorization) variants.push({ name: 'without_authorization', removeHeaders: ['authorization'] })
+  if (headers['bigmodel-organization']) variants.push({ name: 'without_bigmodel_organization', removeHeaders: ['bigmodel-organization'] })
+  if (headers['bigmodel-project']) variants.push({ name: 'without_bigmodel_project', removeHeaders: ['bigmodel-project'] })
+  if (urlObj.searchParams.has('token')) variants.push({ name: 'token_removed_from_query', removeQuery: ['token'] })
+  if (urlObj.searchParams.has('uuid')) variants.push({ name: 'without_uuid', removeQuery: ['uuid'] })
+  if (urlObj.searchParams.has('device_id')) variants.push({ name: 'without_device_id', removeQuery: ['device_id'] })
+  if (urlObj.searchParams.has('user_id')) variants.push({ name: 'without_user_id', removeQuery: ['user_id'] })
+  if (Object.prototype.hasOwnProperty.call(body, 'chat_id')) variants.push({ name: 'without_chat_id', removeBodyPaths: ['chat_id'] })
+  if (Object.prototype.hasOwnProperty.call(body, 'model_option')) variants.push({ name: 'without_model_option', removeBodyPaths: ['model_option'] })
+  if (Object.prototype.hasOwnProperty.call(body, 'model')) variants.push({ name: 'without_model', removeBodyPaths: ['model'] })
+  if (Object.prototype.hasOwnProperty.call(body, 'modelId')) variants.push({ name: 'without_modelId', removeBodyPaths: ['modelId'] })
+  if (Object.prototype.hasOwnProperty.call(body, 'tools')) variants.push({ name: 'without_tools', removeBodyPaths: ['tools'] })
+  if (Object.prototype.hasOwnProperty.call(body, 'thinking')) variants.push({ name: 'without_thinking', removeBodyPaths: ['thinking'] })
+  if (body.stream === true) variants.push({ name: 'non_stream', setBody: { stream: false } })
+  return variants
 }
 
-function sanitizeCookie(rawCookie) {
-  if (typeof rawCookie !== 'string') {
-    return { value: undefined, present: false, length: 0, valid: true, reason: 'missing' }
-  }
-
-  const value = rawCookie
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .join('; ')
-
-  if (!value) {
-    return { value: undefined, present: false, length: 0, valid: false, reason: 'empty_after_sanitize' }
-  }
-
-  try {
-    validateHeaderName('cookie')
-    validateHeaderValue('cookie', value)
-    return { value, present: true, length: value.length, valid: true }
-  } catch {
-    return { value: undefined, present: true, length: value.length, valid: false, reason: 'invalid_header_value' }
-  }
-}
-
-function buildSafeRequestSummary(provider, method, urlObj, headers, body, allowFullPrompt) {
-  const queryKeys = [...new Set([...urlObj.searchParams.keys()])]
-  const token = urlObj.searchParams.get('token')
+function safeSummary(input, showPrompt) {
+  const method = (input.request.method || 'POST').toUpperCase()
+  const urlObj = new URL(input.request.url)
+  const headers = Object.fromEntries(Object.entries(input.request.headers || {}).map(([k, v]) => [normalizeHeaderKey(k), v]))
+  const body = isObject(input.request.body) ? input.request.body : {}
   const cookie = sanitizeCookie(headers.cookie)
-
-  const summary = {
-    provider,
+  return {
+    provider: input.provider,
     method,
     endpoint_path: urlObj.pathname,
-    query_keys: queryKeys,
-    query: {
-      has_token: token !== null,
-      token_length: token ? token.length : 0,
-      has_uuid: urlObj.searchParams.has('uuid'),
-      uuid_length: toLength(urlObj.searchParams.get('uuid')),
-      has_device_id: urlObj.searchParams.has('device_id'),
-      device_id_length: toLength(urlObj.searchParams.get('device_id')),
-      has_user_id: urlObj.searchParams.has('user_id'),
-      user_id_length: toLength(urlObj.searchParams.get('user_id')),
-    },
-    headers: {
-      has_cookie: cookie.present,
-      cookie_length: cookie.length,
-      cookie_valid: cookie.valid,
-      has_authorization: typeof headers.authorization === 'string',
-      has_user_agent: typeof headers['user-agent'] === 'string',
-    },
-    body: {
-      top_level_keys: isObject(body) ? Object.keys(body) : [],
-      msg_type: isObject(body) ? body.msg_type : undefined,
-      chat_type: isObject(body) ? body.chat_type : undefined,
-      has_chat_id: isObject(body) && Object.prototype.hasOwnProperty.call(body, 'chat_id'),
-      chat_id_length: isObject(body) ? toLength(body.chat_id) : 0,
-      model_option_display_name:
-        isObject(body) && isObject(body.model_option) ? body.model_option.display_name : undefined,
-      model_option_model_type:
-        isObject(body) && isObject(body.model_option) ? body.model_option.model_type : undefined,
-      sub_agent_ids_length:
-        isObject(body) && Array.isArray(body.sub_agent_ids) ? body.sub_agent_ids.length : 0,
-      selected_mcp_tools_length:
-        isObject(body) && Array.isArray(body.selected_mcp_tools) ? body.selected_mcp_tools.length : 0,
-      attachments_length: isObject(body) && Array.isArray(body.attachments) ? body.attachments.length : 0,
-      text: readPromptPreview(isObject(body) ? body.text : undefined, allowFullPrompt),
-    },
+    query_keys: [...new Set([...urlObj.searchParams.keys()])],
+    header_keys: Object.keys(headers),
+    has_token: urlObj.searchParams.has('token'), token_length: toLength(urlObj.searchParams.get('token')),
+    has_cookie: cookie.present, cookie_length: cookie.length,
+    has_authorization: typeof headers.authorization === 'string', authorization_length: toLength(headers.authorization),
+    has_bigmodel_organization: typeof headers['bigmodel-organization'] === 'string',
+    has_bigmodel_project: typeof headers['bigmodel-project'] === 'string',
+    body_top_level_keys: Object.keys(body),
+    model: body.model, modelId: body.modelId, stream: body.stream,
+    thinking_type: isObject(body.thinking) ? body.thinking.type : undefined,
+    tools_length: Array.isArray(body.tools) ? body.tools.length : 0,
+    prompt_length: Array.isArray(body.prompt) ? body.prompt.length : 0,
+    last_user_text_length: (() => {
+      if (!Array.isArray(body.prompt)) return 0
+      const users = body.prompt.filter((x) => isObject(x) && x.role === 'user' && typeof x.content === 'string')
+      if (!users.length) return 0
+      const t = users[users.length - 1].content
+      return showPrompt ? t : toLength(t)
+    })(),
   }
-
-  if (!cookie.valid) {
-    summary.headers.cookie_invalid_reason = cookie.reason
-  }
-
-  return summary
 }
 
-function buildRequestHeaders(inputHeaders, cookieInfo) {
-  const headers = {}
-
-  const safeHeaderKeys = [
-    'accept',
-    'accept-language',
-    'content-type',
-    'origin',
-    'referer',
-    'user-agent',
-    'sec-ch-ua',
-    'sec-ch-ua-mobile',
-    'sec-ch-ua-platform',
-    'sec-fetch-dest',
-    'sec-fetch-mode',
-    'sec-fetch-site',
-    'x-requested-with',
-  ]
-
-  for (const key of safeHeaderKeys) {
-    if (typeof inputHeaders[key] === 'string' && inputHeaders[key].trim()) {
-      headers[key] = inputHeaders[key]
-    }
-  }
-
-  if (!headers['content-type']) {
-    headers['content-type'] = 'application/json;charset=UTF-8'
-  }
-
-  if (!headers.accept) {
-    headers.accept = 'application/json, text/plain, */*'
-  }
-
-  if (!headers['user-agent']) {
-    headers['user-agent'] =
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36'
-  }
-
-  if (cookieInfo.valid && cookieInfo.value) {
-    headers.cookie = cookieInfo.value
-  }
-
-  return headers
-}
-
-async function runHttpRequest({ method, url, headers, body }) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
-
+async function runHttpRequest(req) {
+  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
   try {
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: controller.signal,
-    })
-
-    const contentType = response.headers.get('content-type') ?? ''
-    const rawText = await response.text()
-    const parsed = tryParseJson(rawText)
-
-    const responseTopLevelKeys = isObject(parsed) ? Object.keys(parsed) : []
-    const baseResp = isObject(parsed) && isObject(parsed.base_resp) ? parsed.base_resp : undefined
-
-    return {
-      ok: response.ok,
-      status: response.status,
-      contentType,
-      responseLength: rawText.length,
-      topLevelKeys: responseTopLevelKeys,
-      baseRespStatusCode: baseResp?.status_code,
-      baseRespStatusMsg: baseResp?.status_msg,
-      hasChatId: isObject(parsed) && Object.prototype.hasOwnProperty.call(parsed, 'chat_id'),
-      hasMsgId: isObject(parsed) && Object.prototype.hasOwnProperty.call(parsed, 'msg_id'),
-      transportError: null,
-      cookieRejected: false,
+    const response = await fetch(req.url, { method: req.method, headers: req.headers, body: req.body === undefined ? undefined : JSON.stringify(req.body), signal: controller.signal })
+    const contentType = response.headers.get('content-type') || ''
+    const isStream = contentType.includes('text/event-stream')
+    if (!isStream) {
+      const text = await response.text(); const parsed = tryParseJson(text); const baseResp = isObject(parsed?.base_resp) ? parsed.base_resp : undefined
+      return { status: response.status, contentType, responseLength: text.length, topLevelKeys: isObject(parsed) ? Object.keys(parsed) : [], baseRespStatusCode: baseResp?.status_code, baseRespStatusMsg: baseResp?.status_msg, hasChatId: !!parsed?.chat_id, hasMsgId: !!parsed?.msg_id, is_event_stream: false }
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return {
-      ok: false,
-      status: null,
-      contentType: null,
-      responseLength: 0,
-      topLevelKeys: [],
-      baseRespStatusCode: undefined,
-      baseRespStatusMsg: undefined,
-      hasChatId: false,
-      hasMsgId: false,
-      transportError: message,
-      cookieRejected: /header|cookie/i.test(message),
+    const streamController = new AbortController(); const st = setTimeout(() => streamController.abort(), STREAM_TIMEOUT_MS)
+    const reader = response.body?.getReader(); const decoder = new TextDecoder(); let chunks = 0; let total = 0; let completion = false; const ev = []
+    while (reader) {
+      const { done, value } = await reader.read(); if (done) break
+      const txt = decoder.decode(value, { stream: true }); chunks += 1; total += txt.length
+      const match = txt.match(/event:\s*([^\n\r]+)/i); if (match && ev.length < 5) ev.push(match[1].trim())
+      if (DONE_MARKERS.some((m) => txt.toLowerCase().includes(m))) { completion = true; break }
     }
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-function evaluateResult(item) {
-  const businessSuccess =
-    item.status !== null &&
-    item.status < 400 &&
-    (item.baseRespStatusCode === 0 || (item.ok && item.baseRespStatusCode === undefined))
-
-  return businessSuccess ? 'success' : 'failed'
-}
-
-function createMinimaxVariants(baseInput) {
-  const variants = []
-
-  const baseRequest = baseInput.request
-  const baseHeaders = isObject(baseRequest.headers) ? cloneJson(baseRequest.headers) : {}
-  const baseBody = isObject(baseRequest.body) ? cloneJson(baseRequest.body) : {}
-
-  variants.push({
-    name: 'exact_browser_replay',
-    modify({ urlObj, headers, body }) {
-      return { urlObj, headers, body }
-    },
-  })
-
-  variants.push({
-    name: 'without_cookie',
-    modify({ urlObj, headers, body }) {
-      const nextHeaders = { ...headers }
-      delete nextHeaders.cookie
-      return { urlObj, headers: nextHeaders, body }
-    },
-  })
-
-  variants.push({
-    name: 'without_chat_id',
-    modify({ urlObj, headers, body }) {
-      const nextBody = cloneJson(body)
-      if (isObject(nextBody)) delete nextBody.chat_id
-      return { urlObj, headers, body: nextBody }
-    },
-  })
-
-  for (const key of ['uuid', 'device_id', 'user_id']) {
-    variants.push({
-      name: `without_${key}`,
-      modify({ urlObj, headers, body }) {
-        const nextUrl = new URL(urlObj.toString())
-        nextUrl.searchParams.delete(key)
-        return { urlObj: nextUrl, headers, body }
-      },
-    })
-  }
-
-  variants.push({
-    name: 'without_sub_agent_ids',
-    modify({ urlObj, headers, body }) {
-      const nextBody = cloneJson(body)
-      if (isObject(nextBody)) delete nextBody.sub_agent_ids
-      return { urlObj, headers, body: nextBody }
-    },
-  })
-
-  variants.push({
-    name: 'without_model_option',
-    modify({ urlObj, headers, body }) {
-      const nextBody = cloneJson(body)
-      if (isObject(nextBody)) delete nextBody.model_option
-      return { urlObj, headers, body: nextBody }
-    },
-  })
-
-  variants.push({
-    name: 'token_removed_from_query',
-    modify({ urlObj, headers, body }) {
-      const nextUrl = new URL(urlObj.toString())
-      nextUrl.searchParams.delete('token')
-      return { urlObj: nextUrl, headers, body }
-    },
-  })
-
-  variants.push({
-    name: 'chat2api_like_minimal_body',
-    modify({ urlObj, headers, body }) {
-      const sourceBody = isObject(body) ? body : {}
-      const nextBody = {
-        msg_type: sourceBody.msg_type ?? 1,
-        text: typeof sourceBody.text === 'string' ? sourceBody.text : 'probe-message',
-        chat_type: sourceBody.chat_type ?? 2,
-      }
-      return { urlObj, headers, body: nextBody }
-    },
-  })
-
-  return {
-    method: typeof baseRequest.method === 'string' ? baseRequest.method.toUpperCase() : 'POST',
-    url: String(baseRequest.url || ''),
-    headers: isObject(baseHeaders) ? baseHeaders : {},
-    body: isObject(baseBody) ? baseBody : {},
-    variants,
-  }
-}
-
-function printSafeRequestSummary(summary, allowFullPrompt) {
-  console.log('Input Summary:')
-  console.log(`  provider: ${summary.provider}`)
-  console.log(`  method: ${summary.method}`)
-  console.log(`  endpoint_path: ${summary.endpoint_path}`)
-  console.log(`  query_keys: ${summary.query_keys.join(', ') || '(none)'}`)
-  console.log(`  query.has_token: ${summary.query.has_token}`)
-  console.log(`  query.token_length: ${summary.query.token_length}`)
-  console.log(`  headers.has_cookie: ${summary.headers.has_cookie}`)
-  console.log(`  headers.cookie_length: ${summary.headers.cookie_length}`)
-  console.log(`  headers.cookie_valid: ${summary.headers.cookie_valid}`)
-  if (summary.headers.cookie_invalid_reason) {
-    console.log(`  headers.cookie_invalid_reason: ${summary.headers.cookie_invalid_reason}`)
-  }
-  console.log(`  body.top_level_keys: ${summary.body.top_level_keys.join(', ') || '(none)'}`)
-  console.log(`  body.msg_type: ${summary.body.msg_type ?? '(missing)'}`)
-  console.log(`  body.chat_type: ${summary.body.chat_type ?? '(missing)'}`)
-  console.log(`  body.has_chat_id: ${summary.body.has_chat_id}`)
-  console.log(`  body.chat_id_length: ${summary.body.chat_id_length}`)
-  console.log(`  body.model_option.display_name: ${summary.body.model_option_display_name ?? '(missing)'}`)
-  console.log(`  body.model_option.model_type: ${summary.body.model_option_model_type ?? '(missing)'}`)
-  console.log(`  body.sub_agent_ids_length: ${summary.body.sub_agent_ids_length}`)
-  console.log(`  body.selected_mcp_tools_length: ${summary.body.selected_mcp_tools_length}`)
-  console.log(`  body.attachments_length: ${summary.body.attachments_length}`)
-  if (summary.body.text.present) {
-    if (allowFullPrompt) {
-      console.log(`  body.text: ${summary.body.text.full}`)
-    } else {
-      console.log(`  body.text_preview: ${summary.body.text.redacted}`)
-      console.log(`  body.text_length: ${summary.body.text.totalLength}`)
-    }
-  }
-  console.log('')
-}
-
-function printVariantResult(result) {
-  console.log(`Variant ${result.name}:`)
-  if (result.skipped) {
-    console.log(`  skipped: true`)
-    console.log(`  reason: ${result.reason}`)
-    console.log('')
-    return
-  }
-
-  console.log(`  status: ${result.status ?? '(no response)'}`)
-  console.log(`  content_type: ${result.contentType ?? '(none)'}`)
-  console.log(`  response_length: ${result.responseLength}`)
-  console.log(`  response_keys: ${result.topLevelKeys.join(', ') || '(none)'}`)
-  if (result.baseRespStatusCode !== undefined) {
-    console.log(`  base_resp.status_code: ${result.baseRespStatusCode}`)
-  }
-  if (typeof result.baseRespStatusMsg === 'string') {
-    console.log(`  base_resp.status_msg: ${result.baseRespStatusMsg}`)
-  }
-  console.log(`  has_chat_id: ${result.hasChatId}`)
-  console.log(`  has_msg_id: ${result.hasMsgId}`)
-  if (result.transportError) {
-    console.log(`  transport_error: ${result.transportError}`)
-  }
-  console.log(`  result: ${result.result}`)
-  console.log('')
-}
-
-function printConclusion(results) {
-  const exact = results.find((x) => x.name === 'exact_browser_replay')
-  const requiredHeaders = []
-  const requiredQuery = []
-  const requiredBody = []
-
-  if (exact && exact.result === 'success') {
-    const lookup = new Map(results.map((item) => [item.name, item]))
-
-    if (lookup.get('without_cookie')?.result === 'failed') {
-      requiredHeaders.push('Cookie')
-    }
-
-    if (lookup.get('token_removed_from_query')?.result === 'failed') {
-      requiredQuery.push('token')
-    }
-
-    for (const q of ['uuid', 'device_id', 'user_id']) {
-      if (lookup.get(`without_${q}`)?.result === 'failed') {
-        requiredQuery.push(q)
-      }
-    }
-
-    const bodyChecks = [
-      ['without_chat_id', 'chat_id'],
-      ['without_model_option', 'model_option'],
-      ['without_sub_agent_ids', 'sub_agent_ids'],
-    ]
-
-    for (const [variantName, fieldName] of bodyChecks) {
-      if (lookup.get(variantName)?.result === 'failed') {
-        requiredBody.push(fieldName)
-      }
-    }
-
-    const minimal = lookup.get('chat2api_like_minimal_body')
-    if (minimal?.result === 'failed') {
-      requiredBody.push('msg_type')
-      requiredBody.push('text')
-      requiredBody.push('chat_type')
-    }
-  }
-
-  console.log('Conclusion:')
-  console.log(`  required_headers: ${requiredHeaders.join(', ') || '(undetermined)'}`)
-  console.log(`  required_query: ${requiredQuery.join(', ') || '(undetermined)'}`)
-  console.log(`  required_body: ${requiredBody.join(', ') || '(undetermined)'}`)
-  console.log('')
-
-  if (exact && exact.result === 'success') {
-    console.log('Suggested profile placeholders (no secrets):')
-    console.log('  token: {{credentials.token}}')
-    console.log('  cookies: {{credentials.cookies}}')
-    console.log('  chatId: {{credentials.chatId}}')
-    console.log('  webUuid: {{credentials.webUuid}}')
-    console.log('  webDeviceId: {{credentials.webDeviceId}}')
-    console.log('  webUserId: {{credentials.webUserId}}')
-    console.log('  prompt: {{input.prompt}}')
-  }
+    clearTimeout(st)
+    return { status: response.status, contentType, responseLength: total, topLevelKeys: [], hasChatId: false, hasMsgId: false, is_event_stream: true, chunks_seen: chunks, first_event_names: ev, completion_detected: completion }
+  } catch (e) {
+    return { status: null, contentType: null, responseLength: 0, topLevelKeys: [], hasChatId: false, hasMsgId: false, transportError: e instanceof Error ? e.message : String(e), is_event_stream: false }
+  } finally { clearTimeout(timeout) }
 }
 
 function validateInput(input) {
   const errors = []
-
-  if (!isObject(input)) {
-    errors.push('input must be a JSON object')
-    return errors
-  }
-
-  if (typeof input.provider !== 'string' || !input.provider.trim()) {
-    errors.push('provider must be a non-empty string')
-  }
-
-  if (!isObject(input.request)) {
-    errors.push('request must be an object')
-    return errors
-  }
-
-  if (typeof input.request.url !== 'string' || !input.request.url.trim()) {
-    errors.push('request.url must be a non-empty string')
-  } else {
-    try {
-      new URL(input.request.url)
-    } catch {
-      errors.push('request.url must be a valid URL')
-    }
-  }
-
-  if (input.request.method !== undefined && typeof input.request.method !== 'string') {
-    errors.push('request.method must be a string if provided')
-  }
-
-  if (input.request.headers !== undefined && !isObject(input.request.headers)) {
-    errors.push('request.headers must be an object if provided')
-  }
-
-  if (input.request.body !== undefined && !isObject(input.request.body)) {
-    errors.push('request.body must be an object if provided')
-  }
-
+  if (!isObject(input)) return ['input must be object']
+  if (typeof input.provider !== 'string' || !input.provider.trim()) errors.push('provider must be non-empty string')
+  if (!isObject(input.request)) errors.push('request must be object')
+  if (typeof input?.request?.url !== 'string') errors.push('request.url must be string')
+  if (input?.request?.method !== undefined && typeof input.request.method !== 'string') errors.push('request.method must be string')
+  if (input?.request?.headers !== undefined && !isObject(input.request.headers)) errors.push('request.headers must be object')
+  if (input?.request?.body !== undefined && !isObject(input.request.body)) errors.push('request.body must be object')
+  if (input.variants !== undefined && !Array.isArray(input.variants)) errors.push('variants must be array')
   return errors
 }
 
 async function main() {
-  const args = process.argv.slice(2)
-  const showPrompt = args.includes('--show-prompt')
-  const filePath = args.find((x) => !x.startsWith('--'))
+  const args = process.argv.slice(2); const showPrompt = args.includes('--show-prompt'); const filePath = args.find((x) => !x.startsWith('--'))
+  if (!filePath) { printUsage(); process.exitCode = 1; return }
+  const raw = await fs.readFile(filePath, 'utf8'); const input = JSON.parse(raw)
+  const errors = validateInput(input); if (errors.length) { console.error('Input validation failed:'); errors.forEach((e) => console.error(`  - ${e}`)); process.exitCode = 1; return }
 
-  if (!filePath) {
-    printUsage()
-    process.exitCode = 1
-    return
-  }
+  const summary = safeSummary(input, showPrompt)
+  console.log(`Provider Probe Report: ${summary.provider}`)
+  console.log('Input Summary:')
+  console.log(JSON.stringify(summary, null, 2))
 
-  let raw
-  try {
-    raw = await fs.readFile(filePath, 'utf8')
-  } catch {
-    console.error('Failed to read input file. Ensure the path exists and is readable.')
-    process.exitCode = 1
-    return
-  }
-
-  let input
-  try {
-    input = JSON.parse(raw)
-  } catch {
-    console.error('Invalid JSON input file.')
-    process.exitCode = 1
-    return
-  }
-
-  const validationErrors = validateInput(input)
-  if (validationErrors.length > 0) {
-    console.error('Input validation failed:')
-    for (const err of validationErrors) {
-      console.error(`  - ${err}`)
-    }
-    process.exitCode = 1
-    return
-  }
-
-  const provider = input.provider.toLowerCase()
-  if (provider !== 'minimax') {
-    console.error(`Unsupported provider '${input.provider}'. Current supported provider: minimax.`)
-    process.exitCode = 1
-    return
-  }
-
-  const plan = createMinimaxVariants(input)
-  const urlObj = new URL(plan.url)
-  const initialSummary = buildSafeRequestSummary(
-    provider,
-    plan.method,
-    urlObj,
-    isObject(plan.headers) ? plan.headers : {},
-    plan.body,
-    showPrompt,
-  )
-
-  console.log(`Provider Probe Report: ${provider}`)
-  console.log('')
-  printSafeRequestSummary(initialSummary, showPrompt)
+  const method = (input.request.method || 'POST').toUpperCase()
+  const baseUrl = new URL(input.request.url)
+  const rawHeaders = Object.fromEntries(Object.entries(input.request.headers || {}).map(([k, v]) => [normalizeHeaderKey(k), v]))
+  const baseBody = cloneJson(input.request.body || {})
+  const variants = [{ name: 'exact_browser_replay' }, ...(Array.isArray(input.variants) && input.variants.length ? input.variants : buildAutoVariants(input))]
 
   const results = []
-
-  for (const variant of plan.variants) {
-    const variantUrl = new URL(plan.url)
-    const cookieInfo = sanitizeCookie(plan.headers.cookie)
-
-    if (variant.name === 'exact_browser_replay' && plan.headers.cookie && !cookieInfo.valid) {
-      const skipped = {
-        name: variant.name,
-        skipped: true,
-        reason: `cookie is invalid (${cookieInfo.reason}); variant skipped safely`,
-      }
-      results.push(skipped)
-      printVariantResult(skipped)
-      continue
+  for (const v of variants) {
+    const mutated = applyVariant({ method, urlObj: baseUrl, headers: rawHeaders, body: baseBody }, v)
+    const hv = validateHeaders(mutated.headers)
+    if (!Object.keys(hv.validHeaders).length && Object.keys(mutated.headers).length) {
+      const skipped = { name: v.name, skipped: true, reason: 'all headers invalid after validation', headerDiagnostics: hv.skipped }
+      results.push(skipped); console.log(JSON.stringify(skipped, null, 2)); continue
     }
-
-    const baseHeaders = buildRequestHeaders(plan.headers, cookieInfo)
-    const baseBody = cloneJson(plan.body)
-
-    const mutated = variant.modify({
-      urlObj: variantUrl,
-      headers: baseHeaders,
-      body: baseBody,
-    })
-
-    const result = await runHttpRequest({
-      method: plan.method,
-      url: mutated.urlObj.toString(),
-      headers: mutated.headers,
-      body: mutated.body,
-    })
-
-    const finalResult = {
-      name: variant.name,
-      ...result,
-      result: evaluateResult(result),
-    }
-    results.push(finalResult)
-    printVariantResult(finalResult)
+    const res = await runHttpRequest({ method, url: mutated.urlObj.toString(), headers: hv.validHeaders, body: mutated.body })
+    const item = { name: v.name, skipped: false, headerDiagnostics: hv.skipped, ...res }
+    results.push(item); console.log(JSON.stringify(item, null, 2))
   }
 
-  printConclusion(results)
+  console.log('Summary:')
+  console.log(JSON.stringify(results.map((r) => ({ name: r.name, skipped: r.skipped, status: r.status, is_event_stream: r.is_event_stream })), null, 2))
 }
 
-main().catch(() => {
-  console.error('Unexpected probe error (details redacted).')
-  process.exitCode = 1
-})
+main().catch(() => { console.error('Unexpected probe error (details redacted).'); process.exitCode = 1 })
