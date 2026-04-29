@@ -32,14 +32,13 @@ import { normalizeCredentialFields, sortCredentialFields } from '../../../../sha
 
 /**
  * Map OAuth credentials to provider credential field names
- * OAuth returns credentials with keys like 'chatglm_refresh_token', but providers expect 'refresh_token'
+ * OAuth returns provider-specific credential keys that need mapping for manual account fields.
  * DeepSeek stores token as JSON: {"value":"..."}
  */
 function mapOAuthCredentials(providerId: string | undefined, credentials: Record<string, string>): Record<string, string> {
   if (!providerId) return credentials
 
   const credentialKeyMap: Record<string, string> = {
-    'glm': 'chatglm_refresh_token',
     'deepseek': 'userToken',
     'qwen': 'tongyi_sso_ticket',
     'qwen-ai': 'tongyi_sso_ticket',
@@ -49,7 +48,6 @@ function mapOAuthCredentials(providerId: string | undefined, credentials: Record
   }
 
   const providerFieldNames: Record<string, string> = {
-    'glm': 'refresh_token',
     'deepseek': 'token',
     'qwen': 'ticket',
     'qwen-ai': 'ticket',
@@ -169,7 +167,7 @@ export function AddAccountDialog({
   const isEditing = !!editingAccount
   const builtinProvider = provider as BuiltinProviderConfig | null
   const credentialFields: CredentialField[] = sortCredentialFields(normalizeCredentialFields(builtinProvider?.credentialFields || getDefaultCredentialFields(provider?.authType, t))).filter((field) => field.enabled !== false)
-  const supportsOAuth = provider && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity'].includes(provider.id)
+  const supportsOAuth = provider && ['deepseek', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity'].includes(provider.id)
 
   useEffect(() => {
     if (open) {
