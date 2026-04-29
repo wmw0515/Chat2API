@@ -22,7 +22,7 @@ import {
   ToolCallState 
 } from '../utils/streamToolHandler'
 
-const GLM_API_BASE = 'https://chatglm.cn/chatglm'
+const GLM_API_BASE = 'https://bigmodel.cn/api'
 const DEFAULT_ASSISTANT_ID = '65940acff94777010aa6b796'
 const SIGN_SECRET = '8a1317a7468aa3ad86e997d08f3f31cb'
 const ACCESS_TOKEN_EXPIRES = 3600
@@ -115,66 +115,15 @@ export class GLMAdapter {
     this.account = account
   }
 
-  private getRefreshToken(): string {
+  private getAuthorization(): string {
     const credentials = this.account.credentials
-    return credentials.refresh_token || credentials.token || ''
+    return credentials.authorization || credentials.token || credentials.refresh_token || ''
   }
 
   private async acquireToken(): Promise<string> {
-    const refreshToken = this.getRefreshToken()
-    const cached = tokenCache.get(refreshToken)
-    if (cached && Date.now() < cached.expiresAt) {
-      return cached.accessToken
-    }
-
-    console.log('[GLM] Refreshing Token...')
-    const sign = generateSign()
-    const response = await axios.post(
-      `${GLM_API_BASE}/user-api/user/refresh`,
-      {},
-      {
-        headers: {
-          Authorization: `Bearer ${refreshToken}`,
-          ...FAKE_HEADERS,
-          'X-Device-Id': uuid(),
-          'X-Nonce': sign.nonce,
-          'X-Request-Id': uuid(),
-          'X-Sign': sign.sign,
-          'X-Timestamp': sign.timestamp,
-        },
-        timeout: 15000,
-        validateStatus: () => true,
-      }
-    )
-
-    console.log('[GLM] Token response:', JSON.stringify(response.data, null, 2))
-    const { code, status, message } = response.data || {}
-    const isSuccess = code === 0 || status === 0
-    if (response.status !== 200 || !isSuccess) {
-      const errorMsg = message || `HTTP ${response.status}`
-      throw new Error(`Token refresh failed: ${errorMsg}`)
-    }
-
-    const { access_token, refresh_token } = response.data.result
-    const tokenInfo: TokenInfo = {
-      accessToken: access_token,
-      refreshToken: refresh_token,
-      expiresAt: Date.now() + ACCESS_TOKEN_EXPIRES * 1000,
-    }
-    tokenCache.set(refreshToken, tokenInfo)
-
-    if (refresh_token !== refreshToken) {
-      console.log('[GLM] Token updated, saving new token')
-      const decryptedCredentials = {
-        refresh_token,
-      }
-      await storeManager.updateAccount(this.account.id, {
-        credentials: decryptedCredentials,
-      })
-    }
-
-    console.log('[GLM] Token refresh successful')
-    return access_token
+    const authorization = this.getAuthorization()
+    if (!authorization) throw new Error('GLM provider now requires BigModel Authorization, Bigmodel Organization, and Bigmodel Project fields.')
+    return authorization
   }
 
   /**
@@ -237,7 +186,7 @@ export class GLMAdapter {
       formData,
       {
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: token,
           Referer: 'https://chatglm.cn/',
           ...FAKE_HEADERS,
           ...formData.getHeaders(),
@@ -522,31 +471,20 @@ GLM STRICT RULES:
     console.log('[GLM] Sending chat request...')
     
     const response = await axios.post(
-      `${GLM_API_BASE}/backend-api/assistant/stream`,
+      `${GLM_API_BASE}/biz/trial/response/v4/sse/11989`,
       {
-        assistant_id: assistantId,
-        conversation_id: '',
-        project_id: '',
-        chat_type: 'user_chat',
-        messages: preparedMessages,
-        meta_data: {
-          channel: '',
-          chat_mode: chatMode || undefined,
-          draft_id: '',
-          if_plus_model: true,
-          input_question_type: 'xxxx',
-          is_networking: isNetworking,
-          is_test: false,
-          platform: 'pc',
-          quote_log_id: '',
-          cogview: {
-            rm_label_watermark: false,
-          },
-        },
+        model: 'glm-5.1',
+        modelId: 11989,
+        stream: true,
+        thinking: { type: 'enabled' },
+        max_tokens: 65536,
+        temperature: request.temperature ?? 1,
+        top_p: 0.95,
+        prompt: preparedMessages.map((m: any) => ({ role: m.role, content: Array.isArray(m.content) ? m.content.map((c: any) => c.text || '').join('') : m.content, fileContentList: [] })),
       },
       {
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: token,
           ...FAKE_HEADERS,
           'X-Device-Id': uuid(),
           'X-Request-Id': uuid(),
@@ -575,7 +513,7 @@ GLM STRICT RULES:
         },
         {
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: token,
             Referer: 'https://chatglm.cn/main/alltoolsdetail',
             'X-Device-Id': uuid(),
             'X-Request-Id': uuid(),
@@ -612,7 +550,7 @@ GLM STRICT RULES:
           { page, page_size: 100 },
           {
             headers: {
-              Authorization: `Bearer ${token}`,
+              Authorization: token,
               Referer: 'https://chatglm.cn/main/alltoolsdetail',
               'X-Device-Id': uuid(),
               'X-Request-Id': uuid(),
@@ -661,7 +599,7 @@ GLM STRICT RULES:
         { conversation_ids: allConversationIds },
         {
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: token,
             Referer: 'https://chatglm.cn/main/alltoolsdetail',
             'X-Device-Id': uuid(),
             'X-Request-Id': uuid(),
@@ -690,7 +628,7 @@ GLM STRICT RULES:
   }
 
   static isGLMProvider(provider: Provider): boolean {
-    return provider.id === 'glm' || provider.apiEndpoint.includes('chatglm.cn')
+    return provider.id === 'glm' || provider.apiEndpoint.includes('chatglm.cn') || provider.apiEndpoint.includes('bigmodel.cn')
   }
 }
 
