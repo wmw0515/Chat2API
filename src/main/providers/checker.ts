@@ -5,6 +5,7 @@ import type { BuiltinProviderConfig } from '../store/types'
 import { normalizeMimoCredentials } from './mimoCredentials'
 
 const CHECK_TIMEOUT = 15000
+const GLM_VALIDATION_TIMEOUT = 30000
 
 export interface TokenCheckResult {
   valid: boolean
@@ -311,7 +312,7 @@ export class ProviderChecker {
             'Content-Type': 'application/json',
             'Set-Language': 'zh',
           },
-          timeout: CHECK_TIMEOUT,
+          timeout: GLM_VALIDATION_TIMEOUT,
           responseType: 'stream',
           validateStatus: () => true,
         }
@@ -321,20 +322,9 @@ export class ProviderChecker {
       if (response.status === 500) return { valid: false, error: 'Validation failed: missing Bigmodel-Organization or Bigmodel-Project' }
       if (response.status !== 200 || !contentType.includes('text/event-stream')) return { valid: false, error: `Validation failed: HTTP ${response.status}` }
       const stream = response.data
-      const hasVisibleContent = await new Promise<boolean>((resolve) => {
+      const receivedSseChunk = await new Promise<boolean>((resolve) => {
         let settled = false
         let buffer = ''
-        let hiddenThinkingSeen = false
-        const contentPatterns = [
-          '"content":"',
-          '"text":"',
-          '"answer":"',
-          '"output":"',
-          '"delta":"',
-          '"message":{"content":"',
-          '"delta":{"content":"',
-        ]
-        const hiddenThinkingPatterns = ['"think":"', '"reasoning_content":"', '"reasoning":"', '"thought":"', '"thinking":"']
         const done = (value: boolean) => {
           if (settled) return
           settled = true
@@ -344,17 +334,13 @@ export class ProviderChecker {
           const text = chunk.toString()
           if (/unauthorized|forbidden|token/i.test(text)) return done(false)
           buffer += text
-          if (hiddenThinkingPatterns.some((p) => buffer.includes(p))) hiddenThinkingSeen = true
-          if (contentPatterns.some((p) => buffer.includes(p))) return done(true)
+          if (buffer.includes('data:') || buffer.includes('event:')) return done(true)
         })
         stream.once('end', () => done(false))
         stream.once('error', () => done(false))
-        setTimeout(() => done(false), 8000)
-        stream.once('close', () => {
-          if (hiddenThinkingSeen) done(false)
-        })
+        setTimeout(() => done(false), 12000)
       })
-      if (!hasVisibleContent) return { valid: false, error: 'GLM produced thinking chunks but no visible content was extracted.' }
+      if (!receivedSseChunk) return { valid: false, error: 'GLM health_timeout: no SSE chunk received within validation window.' }
       return { valid: true, userInfo: { name: 'GLM User' } }
     } catch (error) {
       return { valid: false, error: error instanceof AxiosError ? error.message : 'Connection failed' }

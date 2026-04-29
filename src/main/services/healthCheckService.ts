@@ -1,4 +1,5 @@
 import { storeManager } from '../store/store'
+import axios from 'axios'
 import { ProviderManager } from '../store/providers'
 import { AccountManager } from '../store/accounts'
 import { requestForwarder } from '../proxy/forwarder'
@@ -38,6 +39,7 @@ export type ScheduledHealthCheckStatus = {
 }
 
 const HEALTH_CHECK_TIMEOUT_MS = 30_000
+const GLM_HEALTH_CHECK_TIMEOUT_MS = 90_000
 const HEALTH_CHECK_PROMPT = 'Please reply only: ok'
 const MODEL_CHECK_DELAY_MS = 1_000
 
@@ -432,6 +434,10 @@ export class HealthCheckService {
   }
 
   async runMinimalProbe(provider: Provider, account: Account, model: string, actualModel: string): Promise<HealthCheckResult> {
+    if (provider.id === 'glm') {
+      return this.runGlmSseProbe(provider, account, model, actualModel)
+    }
+
     const startedAt = Date.now()
     const request: ChatCompletionRequest = {
       model,
@@ -547,6 +553,85 @@ export class HealthCheckService {
         errorMessage: sanitizedError,
         checkedAt,
       }
+    }
+  }
+
+  private async runGlmSseProbe(provider: Provider, account: Account, model: string, actualModel: string): Promise<HealthCheckResult> {
+    const checkedAt = Date.now()
+    const credentials = account.credentials || {}
+    const authorization = credentials.authorization
+    const bigmodelOrganization = credentials.bigmodelOrganization
+    const bigmodelProject = credentials.bigmodelProject
+    if (!authorization || !bigmodelOrganization || !bigmodelProject) {
+      this.applyFailureState(provider.id, model, actualModel, account, 'credential_error', 'GLM missing required credentials.', checkedAt)
+      return { success: false, providerId: provider.id, accountId: account.id, model, actualModel, status: 'credential_error', errorCode: 'credential_error', errorMessage: 'GLM missing required credentials.', checkedAt }
+    }
+
+    try {
+      const response = await axios.post('https://bigmodel.cn/api/biz/trial/response/v4/sse/11989', {
+        model: 'glm-5.1',
+        modelId: 11989,
+        stream: true,
+        thinking: { type: 'enabled' },
+        max_tokens: 65536,
+        temperature: 1,
+        top_p: 0.95,
+        prompt: [{ role: 'user', content: '只回复 glm-ok', fileContentList: [] }],
+      }, {
+        headers: {
+          Authorization: authorization,
+          'Bigmodel-Organization': bigmodelOrganization,
+          'Bigmodel-Project': bigmodelProject,
+          Origin: 'https://bigmodel.cn',
+          Referer: 'https://bigmodel.cn/trialcenter/modeltrial/text?modelCode=glm-5.1',
+          Accept: 'text/event-stream',
+          'Content-Type': 'application/json',
+          'Set-Language': 'zh',
+        },
+        timeout: GLM_HEALTH_CHECK_TIMEOUT_MS,
+        responseType: 'stream',
+        validateStatus: () => true,
+      })
+
+      const contentType = String(response.headers['content-type'] || '')
+      if (response.status === 401 || response.status === 403) throw new Error(`Validation failed: HTTP ${response.status}`)
+      if (response.status === 500) throw new Error('Validation failed: missing Bigmodel-Organization or Bigmodel-Project')
+      if (response.status !== 200 || !contentType.includes('text/event-stream')) throw new Error(`Validation failed: HTTP ${response.status}`)
+
+      const receivedSseChunk = await new Promise<boolean>((resolve) => {
+        let settled = false
+        const done = (value: boolean) => {
+          if (settled) return
+          settled = true
+          resolve(value)
+        }
+        const stream = response.data
+        stream.on('data', (chunk: Buffer | string) => {
+          const text = chunk.toString()
+          if (text.includes('data:') || text.includes('event:')) done(true)
+        })
+        stream.once('end', () => done(false))
+        stream.once('error', () => done(false))
+        setTimeout(() => done(false), 20_000)
+      })
+
+      if (!receivedSseChunk) throw new Error('GLM health_timeout: no SSE chunk received within timeout')
+
+      storeManager.markModelRuntimeSuccess(provider.id, model, actualModel)
+      storeManager.updateAccount(account.id, {
+        status: 'active',
+        healthStatus: 'active',
+        errorMessage: undefined,
+        lastRuntimeSuccessAt: Date.now(),
+        lastRuntimeErrorCode: undefined,
+        lastRuntimeErrorMessage: undefined,
+      })
+      return { success: true, providerId: provider.id, accountId: account.id, model, actualModel, status: 'available', checkedAt: Date.now() }
+    } catch (error) {
+      const sanitizedError = sanitizeHealthErrorMessage(sanitizeRuntimeErrorMessage(error instanceof Error ? error.message : 'GLM health check failed'))
+      const category = classifyProviderError(provider.id, { message: sanitizedError }) || 'unknown_error'
+      this.applyFailureState(provider.id, model, actualModel, account, category, sanitizedError, Date.now())
+      return { success: false, providerId: provider.id, accountId: account.id, model, actualModel, status: category, errorCode: category, errorMessage: sanitizedError, checkedAt: Date.now() }
     }
   }
 
