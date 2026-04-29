@@ -203,6 +203,14 @@ export class LoadBalancer {
       return false
     }
 
+    if ((account as any).enabled === false) {
+      return false
+    }
+
+    if (account.lastRuntimeErrorCode === 'credential_error' || account.healthStatus === 'invalid') {
+      return false
+    }
+
     if (account.dailyLimit && account.todayUsed && account.todayUsed >= account.dailyLimit) {
       return false
     }

@@ -1,9 +1,9 @@
 import { storeManager } from '../store/store'
-import axios from 'axios'
 import { ProviderManager } from '../store/providers'
 import { AccountManager } from '../store/accounts'
 import { requestForwarder } from '../proxy/forwarder'
 import { classifyProviderError, sanitizeRuntimeErrorMessage } from '../proxy/utils/runtimeError'
+import { runGlmBigModelSseProbe } from '../providers/glmProbe'
 import type { Account, Provider } from '../store/types'
 import type { HealthCheckSchedulerConfig } from '../../shared/types'
 import type { ChatCompletionRequest, ProxyContext } from '../proxy/types'
@@ -574,108 +574,40 @@ export class HealthCheckService {
   }
 
   private async runGlmSseProbe(provider: Provider, account: Account, model: string, actualModel: string): Promise<HealthCheckResult> {
-    const credentials = account.credentials || {}
-    const authorization = credentials.authorization
-    const bigmodelOrganization = credentials.bigmodelOrganization
-    const bigmodelProject = credentials.bigmodelProject
-    if (!authorization || !bigmodelOrganization || !bigmodelProject) {
-      this.applyFailureState(provider.id, model, actualModel, account, 'credential_error', 'GLM requires Authorization, Bigmodel Organization, and Bigmodel Project.', checkedAt)
-      return { success: false, providerId: provider.id, accountId: account.id, model, actualModel, status: 'credential_error', errorCode: 'credential_error', errorMessage: 'GLM requires Authorization, Bigmodel Organization, and Bigmodel Project.', checkedAt }
+    const checkedAt = Date.now()
+    const probe = await runGlmBigModelSseProbe(account.credentials || {}, GLM_HEALTH_CHECK_TIMEOUT_MS)
+
+    if (!probe.credentialValid) {
+      const errorMessage = probe.errorMessage || 'GLM requires Authorization, Bigmodel Organization, and Bigmodel Project.'
+      this.applyFailureState(provider.id, model, actualModel, account, 'credential_error', errorMessage, checkedAt)
+      return { success: false, providerId: provider.id, accountId: account.id, model, actualModel, status: 'credential_error', errorCode: 'credential_error', errorMessage, checkedAt }
     }
 
-    try {
-      const response = await axios.post('https://bigmodel.cn/api/biz/trial/response/v4/sse/11989', {
-        model: 'glm-5.1',
-        modelId: 11989,
-        stream: true,
-        thinking: { type: 'enabled' },
-        max_tokens: 65536,
-        temperature: 1,
-        top_p: 0.95,
-        tools: [{
-          type: 'web_search',
-          web_search: {
-            search_engine: 'search_std',
-            search_recency_filter: 'noLimit',
-            count: 10,
-            search_intent: false,
-            search_domain_filter: '',
-            content_size: 'medium',
-          },
-          extraMcpData: [],
-        }],
-        prompt: [{ role: 'user', content: '只回复 glm-ok', fileContentList: [] }],
-      }, {
-        headers: {
-          Authorization: authorization,
-          'Bigmodel-Organization': bigmodelOrganization,
-          'Bigmodel-Project': bigmodelProject,
-          Origin: 'https://bigmodel.cn',
-          Referer: 'https://bigmodel.cn/trialcenter/modeltrial/text?modelCode=glm-5.1',
-          Accept: 'text/event-stream',
-          'Content-Type': 'application/json',
-          'Set-Language': 'zh',
-        },
-        timeout: GLM_HEALTH_CHECK_TIMEOUT_MS,
-        responseType: 'stream',
-        validateStatus: () => true,
-      })
-
-      const contentType = String(response.headers['content-type'] || '')
-      if (response.status === 401 || response.status === 403) throw new Error(`Validation failed: HTTP ${response.status}`)
-      if (response.status === 500) throw new Error('Validation failed: missing Bigmodel-Organization or Bigmodel-Project')
-      if (response.status !== 200 || !contentType.includes('text/event-stream')) throw new Error(`Validation failed: HTTP ${response.status}`)
-
-      const sseSummary = await new Promise<{ received: boolean, hasVisibleContent: boolean, hasThinking: boolean }>((resolve) => {
-        let settled = false
-        let hasVisibleContent = false
-        let hasThinking = false
-        const done = (value: boolean) => {
-          if (settled) return
-          settled = true
-          resolve({ received: value, hasVisibleContent, hasThinking })
-        }
-        const stream = response.data
-        stream.on('data', (chunk: Buffer | string) => {
-          const text = chunk.toString()
-          if (text.includes('data:') || text.includes('event:')) {
-            if (text.includes('"content"') && text.includes('"text"')) hasVisibleContent = true
-            if (text.includes('thinking') || text.includes('reasoning')) hasThinking = true
-            done(true)
-          }
-        })
-        stream.once('end', () => done(false))
-        stream.once('error', () => done(false))
-        setTimeout(() => done(false), 20_000)
-      })
-
-      if (!sseSummary.received) throw new Error('GLM health_timeout: no SSE chunk received within timeout')
-
-      if (!sseSummary.hasVisibleContent && sseSummary.hasThinking) {
-        this.safeAddLog('warn', 'GLM returned thinking chunks but no visible content was extracted.', {
-          providerId: provider.id,
-          accountId: account.id,
-          data: { model, actualModel },
-        })
-      }
-
-      storeManager.markModelRuntimeSuccess(provider.id, model, actualModel)
-      storeManager.updateAccount(account.id, {
-        status: 'active',
-        healthStatus: 'active',
-        errorMessage: undefined,
-        lastValidationError: undefined,
-        lastRuntimeSuccessAt: Date.now(),
-        lastRuntimeErrorCode: undefined,
-        lastRuntimeErrorMessage: undefined,
-      })
-      return { success: true, providerId: provider.id, accountId: account.id, model, actualModel, status: 'available', checkedAt: Date.now() }
-    } catch (error) {
-      const sanitizedError = sanitizeHealthErrorMessage(sanitizeRuntimeErrorMessage(error instanceof Error ? error.message : 'GLM health check failed'))
-      const category = classifyProviderError(provider.id, { message: sanitizedError }) || 'unknown_error'
-      this.applyFailureState(provider.id, model, actualModel, account, category, sanitizedError, Date.now())
-      return { success: false, providerId: provider.id, accountId: account.id, model, actualModel, status: category, errorCode: category, errorMessage: sanitizedError, checkedAt: Date.now() }
+    if (!probe.sseChunkReceived) {
+      const warningMessage = probe.warning || 'GLM 健康检测超时：未在检测窗口内收到 SSE 响应。账号凭证未被判定为无效。'
+      this.applyFailureState(provider.id, model, actualModel, account, 'connection_error', warningMessage, checkedAt)
+      return { success: false, providerId: provider.id, accountId: account.id, model, actualModel, status: 'connection_error', errorCode: probe.errorCode || 'connection_error', errorMessage: warningMessage, checkedAt }
     }
+
+    if (probe.warning) {
+      this.safeAddLog('warn', probe.warning, {
+        providerId: provider.id,
+        accountId: account.id,
+        data: { model, actualModel },
+      })
+    }
+
+    storeManager.markModelRuntimeSuccess(provider.id, model, actualModel)
+    storeManager.updateAccount(account.id, {
+      status: 'active',
+      healthStatus: 'active',
+      errorMessage: undefined,
+      lastValidationError: undefined,
+      lastRuntimeSuccessAt: Date.now(),
+      lastRuntimeErrorCode: undefined,
+      lastRuntimeErrorMessage: undefined,
+    })
+    return { success: true, providerId: provider.id, accountId: account.id, model, actualModel, status: 'available', checkedAt: Date.now() }
   }
 
   private hasUsableCredentials(account: Account): boolean {

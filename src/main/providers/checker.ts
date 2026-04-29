@@ -3,6 +3,7 @@ import { getBuiltinProvider } from './builtin'
 import type { Provider, ProviderCheckResult, Account } from '../../shared/types'
 import type { BuiltinProviderConfig } from '../store/types'
 import { normalizeMimoCredentials } from './mimoCredentials'
+import { runGlmBigModelSseProbe } from './glmProbe'
 
 const CHECK_TIMEOUT = 15000
 const GLM_VALIDATION_TIMEOUT = 30000
@@ -280,83 +281,14 @@ export class ProviderChecker {
   }
 
   private static async checkGLMToken(credentials: Record<string, any>): Promise<TokenCheckResult> {
-    const authorization = credentials.authorization
-    const bigmodelOrganization = credentials.bigmodelOrganization
-    const bigmodelProject = credentials.bigmodelProject
-
-    if (!authorization || !bigmodelOrganization || !bigmodelProject) {
-      return { valid: false, error: 'GLM now requires Authorization, Bigmodel Organization, and Bigmodel Project from bigmodel.cn request headers.' }
+    const probe = await runGlmBigModelSseProbe(credentials, GLM_VALIDATION_TIMEOUT)
+    if (!probe.credentialValid) {
+      return { valid: false, error: probe.errorMessage || 'Credential validation failed.' }
     }
-
-    try {
-      const response = await axios.post(
-        'https://bigmodel.cn/api/biz/trial/response/v4/sse/11989',
-        {
-          model: 'glm-5.1',
-          modelId: 11989,
-          stream: true,
-          thinking: { type: 'enabled' },
-          max_tokens: 65536,
-          temperature: 1,
-          top_p: 0.95,
-          tools: [{
-            type: 'web_search',
-            web_search: {
-              search_engine: 'search_std',
-              search_recency_filter: 'noLimit',
-              count: 10,
-              search_intent: false,
-              search_domain_filter: '',
-              content_size: 'medium',
-            },
-            extraMcpData: [],
-          }],
-          prompt: [{ role: 'user', content: '只回复 glm-ok', fileContentList: [] }],
-        },
-        {
-          headers: {
-            Authorization: authorization,
-            'Bigmodel-Organization': bigmodelOrganization,
-            'Bigmodel-Project': bigmodelProject,
-            Origin: 'https://bigmodel.cn',
-            Referer: 'https://bigmodel.cn/trialcenter/modeltrial/text?modelCode=glm-5.1',
-            Accept: 'text/event-stream',
-            'Content-Type': 'application/json',
-            'Set-Language': 'zh',
-          },
-          timeout: GLM_VALIDATION_TIMEOUT,
-          responseType: 'stream',
-          validateStatus: () => true,
-        }
-      )
-      const contentType = String(response.headers['content-type'] || '')
-      if (response.status === 401 || response.status === 403) return { valid: false, error: `Validation failed: HTTP ${response.status}` }
-      if (response.status === 500) return { valid: false, error: 'Validation failed: missing Bigmodel-Organization or Bigmodel-Project' }
-      if (response.status !== 200 || !contentType.includes('text/event-stream')) return { valid: false, error: `Validation failed: HTTP ${response.status}` }
-      const stream = response.data
-      const receivedSseChunk = await new Promise<boolean>((resolve) => {
-        let settled = false
-        let buffer = ''
-        const done = (value: boolean) => {
-          if (settled) return
-          settled = true
-          resolve(value)
-        }
-        stream.on('data', (chunk: Buffer | string) => {
-          const text = chunk.toString()
-          if (/unauthorized|forbidden|token/i.test(text)) return done(false)
-          buffer += text
-          if (buffer.includes('data:') || buffer.includes('event:')) return done(true)
-        })
-        stream.once('end', () => done(false))
-        stream.once('error', () => done(false))
-        setTimeout(() => done(false), 12000)
-      })
-      if (!receivedSseChunk) return { valid: false, error: 'GLM health_timeout: no SSE chunk received within validation window.' }
-      return { valid: true, userInfo: { name: 'GLM User' } }
-    } catch (error) {
-      return { valid: false, error: error instanceof AxiosError ? error.message : 'Connection failed' }
+    if (!probe.sseChunkReceived) {
+      return { valid: false, error: probe.warning || probe.errorMessage || 'GLM health timeout.' }
     }
+    return { valid: true, userInfo: { name: 'GLM User' } }
   }
 
   private static async generateGLMSignV2(): Promise<{ timestamp: string; nonce: string; sign: string }> {
