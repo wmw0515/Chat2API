@@ -592,6 +592,18 @@ export class HealthCheckService {
         max_tokens: 65536,
         temperature: 1,
         top_p: 0.95,
+        tools: [{
+          type: 'web_search',
+          web_search: {
+            search_engine: 'search_std',
+            search_recency_filter: 'noLimit',
+            count: 10,
+            search_intent: false,
+            search_domain_filter: '',
+            content_size: 'medium',
+          },
+          extraMcpData: [],
+        }],
         prompt: [{ role: 'user', content: '只回复 glm-ok', fileContentList: [] }],
       }, {
         headers: {
