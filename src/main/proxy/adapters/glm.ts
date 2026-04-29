@@ -687,9 +687,9 @@ export class GLMStreamHandler {
 
   private extractCommonFields(payload: any): { content: string; hiddenThinking: string; done: boolean } {
     const contentPaths: string[][] = [
-      ['content'], ['text'], ['delta'], ['answer'], ['output'], ['message', 'content'], ['data', 'content'], ['data', 'text'], ['data', 'delta'],
-      ['data', 'answer'], ['data', 'output'], ['data', 'message', 'content'], ['result', 'content'], ['result', 'text'], ['result', 'delta'],
-      ['result', 'answer'],
+      ['content'], ['text'], ['delta'], ['answer'], ['output'], ['msg'], ['message'], ['message', 'content'], ['data', 'content'], ['data', 'text'], ['data', 'delta'],
+      ['data', 'answer'], ['data', 'output'], ['data', 'message'], ['data', 'message', 'content'], ['result', 'content'], ['result', 'text'], ['result', 'delta'],
+      ['result', 'answer'], ['result', 'output'],
       ['choices', '0', 'delta', 'content'], ['choices', '0', 'message', 'content'],
     ]
     const hiddenThinkingPaths: string[][] = [
@@ -747,6 +747,9 @@ export class GLMStreamHandler {
     let sentContent = ''
     let hiddenThinkingLen = 0
     let sentRole = false
+    let eventCount = 0
+    let completionDetected = false
+    let terminated = false
 
     transStream.write(
       `data: ${JSON.stringify({
@@ -761,6 +764,7 @@ export class GLMStreamHandler {
     const parser = createParser({
       onEvent: (event: any) => {
         try {
+          eventCount += 1
           let result: any = {}
           let parseOk = false
           if (event.data && event.data !== '[DONE]') {
@@ -770,7 +774,8 @@ export class GLMStreamHandler {
             } catch {}
           }
           const generic = this.extractCommonFields(result)
-          this.logSseEventSummary(event, cachedParts.length + 1, parseOk, result, !!generic.content, !!generic.hiddenThinking, generic.done)
+          completionDetected = completionDetected || generic.done || event.data === '[DONE]'
+          this.logSseEventSummary(event, eventCount, parseOk, result, !!generic.content, !!generic.hiddenThinking, generic.done)
           if (generic.hiddenThinking) hiddenThinkingLen += generic.hiddenThinking.length
 
           if (!this.conversationId && result.conversation_id) {
@@ -891,6 +896,25 @@ export class GLMStreamHandler {
 
             // Determine finish_reason based on whether we had tool calls
             const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
+            const hasVisibleContent = sentContent.trim().length > 0
+            const isThinkingOnly = !hasVisibleContent && hiddenThinkingLen > 0 && !this.toolCallState.hasEmittedToolCall
+            if (this.sseDebugEnabled) {
+              console.log('[GLM SSE DEBUG] runtime_decision', JSON.stringify({
+                chunks_seen: eventCount,
+                hidden_thinking_len: hiddenThinkingLen,
+                visible_content_len: sentContent.length,
+                visible_content_emitted: hasVisibleContent || this.toolCallState.hasEmittedToolCall,
+                completion_detected: true,
+                decision: isThinkingOnly ? 'error_only_thinking_no_visible_content' : 'success_with_visible_content',
+              }))
+            }
+
+            if (isThinkingOnly) {
+              terminated = true
+              transStream.end()
+              this.onEnd?.()
+              return
+            }
 
             transStream.write(
               `data: ${JSON.stringify({
@@ -911,17 +935,8 @@ export class GLMStreamHandler {
                 created: this.created,
               })}\n\n`
             )
+            terminated = true
             transStream.end('data: [DONE]\n\n')
-            if (this.sseDebugEnabled) {
-              console.log('[GLM SSE DEBUG] stream_final', JSON.stringify({
-                visible_len: sentContent.length,
-                hidden_thinking_len: hiddenThinkingLen,
-                chunks_seen: cachedParts.length,
-                completion_detected: true,
-                returned_content_len: sentContent.length,
-                only_thinking_received: hiddenThinkingLen > 0 && sentContent.length === 0,
-              }))
-            }
             this.onEnd?.()
           }
         } catch (err) {
@@ -937,22 +952,17 @@ export class GLMStreamHandler {
     stream.once('error', (err: Error) => {
       console.error('[GLM] Stream error:', err.message)
       // Flush any remaining tool call buffer
-      const baseChunk = createBaseChunk(this.conversationId, this.model, this.created)
-      const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'glm')
-      for (const outChunk of flushChunks) {
-        transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+      if (this.sseDebugEnabled) {
+        console.log('[GLM SSE DEBUG] runtime_decision', JSON.stringify({
+          chunks_seen: eventCount,
+          hidden_thinking_len: hiddenThinkingLen,
+          visible_content_len: sentContent.length,
+          visible_content_emitted: sentContent.trim().length > 0 || this.toolCallState.hasEmittedToolCall,
+          completion_detected: completionDetected,
+          decision: 'upstream_error',
+        }))
       }
-      const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
-      transStream.write(
-        `data: ${JSON.stringify({
-          id: this.conversationId,
-          model: this.model,
-          object: 'chat.completion.chunk',
-          choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
-          created: this.created,
-        })}\n\n`
-      )
-      transStream.end('data: [DONE]\n\n')
+      if (!terminated) transStream.end()
       this.onEnd?.()
     })
 
@@ -961,6 +971,22 @@ export class GLMStreamHandler {
       console.log('[GLM] Stream closed')
       // Only send finish if we haven't already
       if (!transStream.closed) {
+        const hasVisibleContent = sentContent.trim().length > 0 || this.toolCallState.hasEmittedToolCall
+        if (this.sseDebugEnabled) {
+          console.log('[GLM SSE DEBUG] runtime_decision', JSON.stringify({
+            chunks_seen: eventCount,
+            hidden_thinking_len: hiddenThinkingLen,
+            visible_content_len: sentContent.length,
+            visible_content_emitted: hasVisibleContent,
+            completion_detected: completionDetected,
+            decision: hasVisibleContent ? 'success_with_visible_content' : (hiddenThinkingLen > 0 ? 'error_only_thinking_no_visible_content' : 'timeout'),
+          }))
+        }
+        if (!hasVisibleContent) {
+          transStream.end()
+          this.onEnd?.()
+          return
+        }
         const baseChunk = createBaseChunk(this.conversationId, this.model, this.created)
         const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'glm')
         for (const outChunk of flushChunks) {
@@ -1094,18 +1120,18 @@ export class GLMStreamHandler {
               const finalContent = cleanContent.trim() || genericContent.trim()
               const hiddenThinkingLen = (fullHiddenThinking || genericHiddenThinking || '').length
               if (this.sseDebugEnabled) {
-                console.log('[GLM SSE DEBUG] non_stream_final', JSON.stringify({
-                  visible_len: finalContent.length,
-                  hidden_thinking_len: hiddenThinkingLen,
+                console.log('[GLM SSE DEBUG] runtime_decision', JSON.stringify({
                   chunks_seen: eventCount,
+                  hidden_thinking_len: hiddenThinkingLen,
+                  visible_content_len: finalContent.length,
+                  visible_content_emitted: finalContent.length > 0 || toolCalls.length > 0,
                   completion_detected: completionDetected,
-                  returned_content_len: finalContent.length,
-                  only_thinking_received: hiddenThinkingLen > 0 && finalContent.length === 0,
+                  decision: finalContent.length > 0 || toolCalls.length > 0 ? 'success_with_visible_content' : (hiddenThinkingLen > 0 ? 'error_only_thinking_no_visible_content' : 'upstream_error'),
                 }))
               }
               if (!finalContent && toolCalls.length === 0) {
                 if (hiddenThinkingLen > 0) {
-                  return reject(new Error('GLM returned only thinking content and no visible answer.'))
+                  return reject(new Error('GLM returned thinking chunks but no visible answer was extracted.'))
                 }
                 return reject(new Error('GLM returned no visible content. Enable CHAT2API_GLM_SSE_DEBUG=1 for safe SSE structure diagnostics.'))
               }
