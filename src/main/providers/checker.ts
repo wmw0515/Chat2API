@@ -284,7 +284,7 @@ export class ProviderChecker {
     const bigmodelProject = credentials.bigmodelProject
 
     if (!authorization || !bigmodelOrganization || !bigmodelProject) {
-      return { valid: false, error: 'GLM provider now requires BigModel Authorization, Bigmodel Organization, and Bigmodel Project fields.' }
+      return { valid: false, error: 'GLM now requires Authorization, Bigmodel Organization, and Bigmodel Project from bigmodel.cn request headers.' }
     }
 
     try {
@@ -320,6 +320,24 @@ export class ProviderChecker {
       if (response.status === 401 || response.status === 403) return { valid: false, error: `Validation failed: HTTP ${response.status}` }
       if (response.status === 500) return { valid: false, error: 'Validation failed: missing Bigmodel-Organization or Bigmodel-Project' }
       if (response.status !== 200 || !contentType.includes('text/event-stream')) return { valid: false, error: `Validation failed: HTTP ${response.status}` }
+      const stream = response.data
+      const hasChunk = await new Promise<boolean>((resolve) => {
+        let settled = false
+        const done = (value: boolean) => {
+          if (settled) return
+          settled = true
+          resolve(value)
+        }
+        stream.once('data', (chunk: Buffer | string) => {
+          const text = chunk.toString()
+          if (/unauthorized|forbidden|token/i.test(text)) return done(false)
+          done(text.trim().length > 0)
+        })
+        stream.once('end', () => done(false))
+        stream.once('error', () => done(false))
+        setTimeout(() => done(false), 5000)
+      })
+      if (!hasChunk) return { valid: false, error: 'Validation failed: no SSE data received from BigModel endpoint' }
       return { valid: true, userInfo: { name: 'GLM User' } }
     } catch (error) {
       return { valid: false, error: error instanceof AxiosError ? error.message : 'Connection failed' }

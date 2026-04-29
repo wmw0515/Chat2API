@@ -230,35 +230,55 @@ export function AddProviderDialog({
       id: 'glm',
       name: t('glm.name'),
       type: 'builtin',
-      authType: 'refresh_token',
-      apiEndpoint: 'https://chatglm.cn/api',
+      authType: 'token',
+      apiEndpoint: 'https://bigmodel.cn/api',
       enabled: true,
-      description: t('glm.description'),
-      supportedModels: ['GLM-5', 'GLM-5-Flash', 'GLM-4-Plus', 'GLM-4-Flash', 'GLM-Zero-Preview', 'GLM-DeepResearch'],
+      description: 'GLM BigModel trial center (domestic), supports GLM-5.1',
+      supportedModels: ['GLM-5.1', 'GLM-5'],
       modelMappings: {
-        'GLM-5': 'glm-5',
-        'GLM-5-Flash': 'glm-5-flash',
-        'GLM-4-Plus': 'glm-4-plus',
-        'GLM-4-Flash': 'glm-4-flash',
-        'GLM-Zero-Preview': 'glm-zero-preview',
-        'GLM-DeepResearch': 'glm-deepresearch',
+        'GLM-5.1': 'glm-5.1',
+        'GLM-5': 'glm-5.1',
       },
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
-        'Origin': 'https://chatglm.cn',
-        'Referer': 'https://chatglm.cn/',
+        'Origin': 'https://bigmodel.cn',
+        'Referer': 'https://bigmodel.cn/trialcenter/modeltrial/text?modelCode=glm-5.1',
       },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       credentialFields: [
         {
-          name: 'refresh_token',
-          label: t('glm.refreshToken'),
+          name: 'authorization',
+          label: 'Authorization',
           type: 'password',
           required: true,
-          placeholder: t('glm.refreshTokenPlaceholder'),
-          helpText: t('glm.refreshTokenHelp'),
+          placeholder: '粘贴 bigmodel.cn 请求头中的 Authorization 值',
+          helpText: '从 bigmodel.cn 成功请求头中复制 Authorization 的值，不要添加 “Authorization:” 前缀。',
+        },
+        {
+          name: 'bigmodelOrganization',
+          label: 'Bigmodel Organization',
+          type: 'password',
+          required: true,
+          placeholder: '粘贴 Bigmodel-Organization 的值',
+          helpText: '从 bigmodel.cn 成功请求头中复制 Bigmodel-Organization 的值。',
+        },
+        {
+          name: 'bigmodelProject',
+          label: 'Bigmodel Project',
+          type: 'password',
+          required: true,
+          placeholder: '粘贴 Bigmodel-Project 的值',
+          helpText: '从 bigmodel.cn 成功请求头中复制 Bigmodel-Project 的值。',
+        },
+        {
+          name: 'cookies',
+          label: 'Cookies (optional)',
+          type: 'textarea',
+          required: false,
+          placeholder: '可选，粘贴 bigmodel.cn 请求头中的 Cookie',
+          helpText: '当前 GLM 请求默认不需要 Cookie，仅确认必要时填写。',
         },
       ],
     },
@@ -436,7 +456,7 @@ export function AddProviderDialog({
     ? providers.find((p) => p.id === selectedProvider) 
     : null
 
-  const supportsOAuth = selectedProviderData && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity'].includes(selectedProviderData.id)
+  const supportsOAuth = selectedProviderData && ['deepseek', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity'].includes(selectedProviderData.id)
 
   const toggleModelExpansion = (providerId: string) => {
     setExpandedModels(prev => {

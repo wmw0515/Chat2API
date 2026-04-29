@@ -36,7 +36,9 @@ export function createAdapter(
     case 'deepseek':
       return new DeepSeekAdapter(config)
     case 'glm':
-      return new GLMAdapter(config)
+      // Domestic GLM now uses BigModel trial credential fields and ProviderChecker validation.
+      // Legacy refresh_token OAuth adapter must not be used for GLM provider validation/login.
+      throw new Error('GLM OAuth adapter is deprecated. Use BigModel Authorization/Organization/Project credentials.')
     case 'kimi':
       return new KimiAdapter(config)
     case 'mimo':
