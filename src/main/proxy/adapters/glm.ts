@@ -115,15 +115,33 @@ export class GLMAdapter {
     this.account = account
   }
 
-  private getAuthorization(): string {
+  private getBigModelCredentials(): { authorization: string; bigmodelOrganization: string; bigmodelProject: string; cookies?: string } {
     const credentials = this.account.credentials
-    return credentials.authorization || credentials.token || credentials.refresh_token || ''
+    const authorization = (credentials.authorization || '').trim()
+    const bigmodelOrganization = (credentials.bigmodelOrganization || '').trim()
+    const bigmodelProject = (credentials.bigmodelProject || '').trim()
+    const cookies = typeof credentials.cookies === 'string' ? credentials.cookies.trim() : ''
+
+    if (!authorization || !bigmodelOrganization || !bigmodelProject) {
+      throw new Error('GLM requires Authorization, Bigmodel Organization, and Bigmodel Project from bigmodel.cn request headers.')
+    }
+
+    return {
+      authorization,
+      bigmodelOrganization,
+      bigmodelProject,
+      cookies: cookies || undefined,
+    }
+  }
+
+  private sanitizeCookieHeader(cookie?: string): string | undefined {
+    if (!cookie) return undefined
+    const sanitized = cookie.replace(/[\r\n]/g, '').trim()
+    return sanitized || undefined
   }
 
   private async acquireToken(): Promise<string> {
-    const authorization = this.getAuthorization()
-    if (!authorization) throw new Error('GLM provider now requires BigModel Authorization, Bigmodel Organization, and Bigmodel Project fields.')
-    return authorization
+    return this.getBigModelCredentials().authorization
   }
 
   /**
@@ -360,8 +378,8 @@ export class GLMAdapter {
   }
 
   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; conversationId: string }> {
-    const token = await this.acquireToken()
-    const sign = generateSign()
+    const { authorization, bigmodelOrganization, bigmodelProject, cookies } = this.getBigModelCredentials()
+    const sanitizedCookies = this.sanitizeCookieHeader(cookies)
 
     // Clone messages to avoid modifying original request
     const messages = [...request.messages]
@@ -484,13 +502,15 @@ GLM STRICT RULES:
       },
       {
         headers: {
-          Authorization: token,
-          ...FAKE_HEADERS,
-          'X-Device-Id': uuid(),
-          'X-Request-Id': uuid(),
-          'X-Sign': sign.sign,
-          'X-Timestamp': sign.timestamp,
-          'X-Nonce': sign.nonce,
+          Authorization: authorization,
+          'Bigmodel-Organization': bigmodelOrganization,
+          'Bigmodel-Project': bigmodelProject,
+          Origin: 'https://bigmodel.cn',
+          Referer: 'https://bigmodel.cn/trialcenter/modeltrial/text?modelCode=glm-5.1',
+          Accept: 'text/event-stream',
+          'Content-Type': 'application/json',
+          'Set-Language': 'zh',
+          ...(sanitizedCookies ? { Cookie: sanitizedCookies } : {}),
         },
         timeout: 120000,
         validateStatus: () => true,
