@@ -434,6 +434,23 @@ export class HealthCheckService {
   }
 
   async runMinimalProbe(provider: Provider, account: Account, model: string, actualModel: string): Promise<HealthCheckResult> {
+    const checkedAt = Date.now()
+    const credentialCheck = this.hasRequiredCredentials(provider.id, account)
+    if (!credentialCheck.ok) {
+      this.applyFailureState(provider.id, model, actualModel, account, 'credential_error', credentialCheck.message || 'Missing required credentials.', checkedAt)
+      return {
+        success: false,
+        providerId: provider.id,
+        accountId: account.id,
+        model,
+        actualModel,
+        status: 'credential_error',
+        errorCode: 'credential_error',
+        errorMessage: credentialCheck.message || 'Missing required credentials.',
+        checkedAt,
+      }
+    }
+
     if (provider.id === 'glm') {
       return this.runGlmSseProbe(provider, account, model, actualModel)
     }
@@ -557,14 +574,13 @@ export class HealthCheckService {
   }
 
   private async runGlmSseProbe(provider: Provider, account: Account, model: string, actualModel: string): Promise<HealthCheckResult> {
-    const checkedAt = Date.now()
     const credentials = account.credentials || {}
     const authorization = credentials.authorization
     const bigmodelOrganization = credentials.bigmodelOrganization
     const bigmodelProject = credentials.bigmodelProject
     if (!authorization || !bigmodelOrganization || !bigmodelProject) {
-      this.applyFailureState(provider.id, model, actualModel, account, 'credential_error', 'GLM missing required credentials.', checkedAt)
-      return { success: false, providerId: provider.id, accountId: account.id, model, actualModel, status: 'credential_error', errorCode: 'credential_error', errorMessage: 'GLM missing required credentials.', checkedAt }
+      this.applyFailureState(provider.id, model, actualModel, account, 'credential_error', 'GLM requires Authorization, Bigmodel Organization, and Bigmodel Project.', checkedAt)
+      return { success: false, providerId: provider.id, accountId: account.id, model, actualModel, status: 'credential_error', errorCode: 'credential_error', errorMessage: 'GLM requires Authorization, Bigmodel Organization, and Bigmodel Project.', checkedAt }
     }
 
     try {
@@ -598,30 +614,45 @@ export class HealthCheckService {
       if (response.status === 500) throw new Error('Validation failed: missing Bigmodel-Organization or Bigmodel-Project')
       if (response.status !== 200 || !contentType.includes('text/event-stream')) throw new Error(`Validation failed: HTTP ${response.status}`)
 
-      const receivedSseChunk = await new Promise<boolean>((resolve) => {
+      const sseSummary = await new Promise<{ received: boolean, hasVisibleContent: boolean, hasThinking: boolean }>((resolve) => {
         let settled = false
+        let hasVisibleContent = false
+        let hasThinking = false
         const done = (value: boolean) => {
           if (settled) return
           settled = true
-          resolve(value)
+          resolve({ received: value, hasVisibleContent, hasThinking })
         }
         const stream = response.data
         stream.on('data', (chunk: Buffer | string) => {
           const text = chunk.toString()
-          if (text.includes('data:') || text.includes('event:')) done(true)
+          if (text.includes('data:') || text.includes('event:')) {
+            if (text.includes('"content"') && text.includes('"text"')) hasVisibleContent = true
+            if (text.includes('thinking') || text.includes('reasoning')) hasThinking = true
+            done(true)
+          }
         })
         stream.once('end', () => done(false))
         stream.once('error', () => done(false))
         setTimeout(() => done(false), 20_000)
       })
 
-      if (!receivedSseChunk) throw new Error('GLM health_timeout: no SSE chunk received within timeout')
+      if (!sseSummary.received) throw new Error('GLM health_timeout: no SSE chunk received within timeout')
+
+      if (!sseSummary.hasVisibleContent && sseSummary.hasThinking) {
+        this.safeAddLog('warn', 'GLM returned thinking chunks but no visible content was extracted.', {
+          providerId: provider.id,
+          accountId: account.id,
+          data: { model, actualModel },
+        })
+      }
 
       storeManager.markModelRuntimeSuccess(provider.id, model, actualModel)
       storeManager.updateAccount(account.id, {
         status: 'active',
         healthStatus: 'active',
         errorMessage: undefined,
+        lastValidationError: undefined,
         lastRuntimeSuccessAt: Date.now(),
         lastRuntimeErrorCode: undefined,
         lastRuntimeErrorMessage: undefined,
@@ -633,6 +664,36 @@ export class HealthCheckService {
       this.applyFailureState(provider.id, model, actualModel, account, category, sanitizedError, Date.now())
       return { success: false, providerId: provider.id, accountId: account.id, model, actualModel, status: category, errorCode: category, errorMessage: sanitizedError, checkedAt: Date.now() }
     }
+  }
+
+  private hasUsableCredentials(account: Account): boolean {
+    const credentials = account.credentials
+    return Boolean(credentials && Object.keys(credentials).length > 0)
+  }
+
+  private hasRequiredCredentials(providerId: string, account: Account): { ok: boolean, message?: string } {
+    if (!this.hasUsableCredentials(account)) {
+      return { ok: false, message: 'No credentials configured for account.' }
+    }
+
+    if (providerId === 'glm') {
+      const credentials = account.credentials || {}
+      if (!credentials.authorization || !credentials.bigmodelOrganization || !credentials.bigmodelProject) {
+        return { ok: false, message: 'GLM requires Authorization, Bigmodel Organization, and Bigmodel Project.' }
+      }
+    }
+
+    return { ok: true }
+  }
+
+  private isAccountEligibleForHealthCheck(providerId: string, account: Account): boolean {
+    if (account.providerId !== providerId) return false
+    if ((account as any).enabled === false) return false
+    if (account.status !== 'active' || account.status === 'disabled' || account.status === 'deleted') return false
+    if (!this.hasUsableCredentials(account)) return false
+    if (account.lastRuntimeErrorCode === 'credential_error') return false
+    if (account.healthStatus === 'invalid' && account.lastRuntimeErrorCode === 'credential_error') return false
+    return true
   }
 
   private applyFailureState(
@@ -662,7 +723,7 @@ export class HealthCheckService {
   }
 
   private pickActiveAccount(providerId: string): Account | null {
-    const candidates = AccountManager.getAvailable(providerId).filter(item => item.status === 'active')
+    const candidates = AccountManager.getByProviderId(providerId, true).filter(account => this.isAccountEligibleForHealthCheck(providerId, account))
     return candidates[0] || null
   }
 
@@ -742,15 +803,7 @@ export class HealthCheckService {
   }
 
   private pickScheduledAccount(providerId: string): Account | null {
-    const candidates = AccountManager.getAvailable(providerId).filter(account => {
-      if (account.status !== 'active') {
-        return false
-      }
-      if (account.healthStatus === 'invalid' || account.lastRuntimeErrorCode === 'credential_error') {
-        return false
-      }
-      return true
-    })
+    const candidates = AccountManager.getByProviderId(providerId, true).filter(account => this.isAccountEligibleForHealthCheck(providerId, account))
     return candidates[0] || null
   }
 

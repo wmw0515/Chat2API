@@ -148,7 +148,7 @@ export function ModelEditor({
     } catch (error) {
       toast({
         title: t('common.error'),
-        description: error instanceof Error ? error.message : t('modelEditor.syncError'),
+        description: error instanceof Error ? localizeBackendError(error.message) : t('modelEditor.syncError'),
         variant: 'destructive',
       })
     } finally {
@@ -305,6 +305,12 @@ export function ModelEditor({
     }
   }
 
+  const localizeBackendError = (message: string) => {
+    if (message === 'No active account with credentials available for health check') return t('modelEditor.noActiveAccountForHealthCheck')
+    if (message === 'No active account with credentials found for model sync') return t('modelEditor.noActiveAccountForModelSync')
+    return message
+  }
+
   const handleCheckModel = async (modelName: string) => {
     setCheckingModel(modelName)
     try {
@@ -319,7 +325,7 @@ export function ModelEditor({
     } catch (error) {
       toast({
         title: t('common.error'),
-        description: error instanceof Error ? error.message : t('modelEditor.checkFailed'),
+        description: error instanceof Error ? localizeBackendError(error.message) : t('modelEditor.checkFailed'),
         variant: 'destructive',
       })
     } finally {
@@ -343,7 +349,7 @@ export function ModelEditor({
     } catch (error) {
       toast({
         title: t('common.error'),
-        description: error instanceof Error ? error.message : t('modelEditor.checkFailed'),
+        description: error instanceof Error ? localizeBackendError(error.message) : t('modelEditor.checkFailed'),
         variant: 'destructive',
       })
     } finally {
