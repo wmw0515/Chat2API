@@ -42,6 +42,7 @@ const HEALTH_CHECK_TIMEOUT_MS = 30_000
 const GLM_HEALTH_CHECK_TIMEOUT_MS = 90_000
 const HEALTH_CHECK_PROMPT = 'Please reply only: ok'
 const MODEL_CHECK_DELAY_MS = 1_000
+const NO_ACCOUNT_HEALTH_CHECK_ERROR = '没有可用于健康检测的有效账户凭证。请先添加或验证该厂商账户。'
 
 const SENSITIVE_FIELD_PATTERN = /(service_token|ph_token|apikey|api_key|cookie|authorization|refresh_token|ticket|sessiontoken)/ig
 
@@ -293,7 +294,7 @@ export class HealthCheckService {
       throw new Error(`Provider not found: ${providerId}`)
     }
 
-    const account = this.pickActiveAccount(providerId)
+    const account = await this.pickActiveAccount(providerId)
     const effectiveModels = storeManager.getEffectiveModels(providerId)
     const mapped = effectiveModels.find(item => item.displayName === modelId)
     const actualModel = mapped?.actualModelId || modelId
@@ -304,7 +305,7 @@ export class HealthCheckService {
         modelId,
         actualModel,
         'unknown_error',
-        'No active account with credentials available for health check',
+        NO_ACCOUNT_HEALTH_CHECK_ERROR,
       )
       return {
         success: false,
@@ -314,7 +315,7 @@ export class HealthCheckService {
         actualModel,
         status: 'unknown_error',
         errorCode: 'no_available_account',
-        errorMessage: 'No active account with credentials available for health check',
+        errorMessage: NO_ACCOUNT_HEALTH_CHECK_ERROR,
         checkedAt,
       }
     }
@@ -333,7 +334,7 @@ export class HealthCheckService {
       throw new Error(`Provider not found: ${providerId}`)
     }
 
-    const account = this.pickActiveAccount(providerId)
+    const account = await this.pickActiveAccount(providerId)
     const effectiveModels = storeManager.getEffectiveModels(providerId)
     if (effectiveModels.length === 0) {
       return {
@@ -347,7 +348,7 @@ export class HealthCheckService {
 
     if (!account) {
       const checkedAt = Date.now()
-      const errorMessage = 'No active account with credentials available for health check'
+      const errorMessage = NO_ACCOUNT_HEALTH_CHECK_ERROR
       const results: HealthCheckResult[] = effectiveModels.map((model) => {
         storeManager.markModelRuntimeFailure(providerId, model.displayName, model.actualModelId, 'unknown_error', errorMessage)
         return {
@@ -666,9 +667,18 @@ export class HealthCheckService {
     storeManager.updateAccount(account.id, runtimeFailureUpdates)
   }
 
-  private pickActiveAccount(providerId: string): Account | null {
+  private async pickActiveAccount(providerId: string): Promise<Account | null> {
     const candidates = AccountManager.getByProviderId(providerId, true).filter(account => this.isAccountEligibleForHealthCheck(providerId, account))
-    return candidates[0] || null
+    if (providerId !== 'glm') return candidates[0] || null
+
+    for (const account of candidates) {
+      const probe = await runGlmBigModelSseProbe(account.credentials || {}, GLM_HEALTH_CHECK_TIMEOUT_MS)
+      if (probe.credentialValid && probe.sseChunkReceived) {
+        return account
+      }
+    }
+
+    return null
   }
 
   private scheduleNextRun(delayMs: number): void {
