@@ -685,32 +685,33 @@ export class GLMStreamHandler {
     return typeof cur === 'string' ? cur : ''
   }
 
-  private extractCommonFields(payload: any): { content: string; reasoning: string; done: boolean } {
+  private extractCommonFields(payload: any): { content: string; hiddenThinking: string; done: boolean } {
     const contentPaths: string[][] = [
-      ['content'], ['text'], ['delta'], ['message', 'content'], ['data', 'content'], ['data', 'text'], ['data', 'delta'],
-      ['data', 'message', 'content'], ['result', 'content'], ['result', 'text'], ['result', 'delta'],
+      ['content'], ['text'], ['delta'], ['answer'], ['output'], ['message', 'content'], ['data', 'content'], ['data', 'text'], ['data', 'delta'],
+      ['data', 'answer'], ['data', 'output'], ['data', 'message', 'content'], ['result', 'content'], ['result', 'text'], ['result', 'delta'],
+      ['result', 'answer'],
       ['choices', '0', 'delta', 'content'], ['choices', '0', 'message', 'content'],
     ]
-    const reasoningPaths: string[][] = [
-      ['reasoning_content'], ['reasoning'], ['thought'], ['thinking'], ['data', 'reasoning_content'],
-      ['data', 'reasoning'], ['data', 'thought'], ['result', 'reasoning_content'],
+    const hiddenThinkingPaths: string[][] = [
+      ['think'], ['reasoning_content'], ['reasoning'], ['thought'], ['thinking'], ['data', 'think'], ['data', 'reasoning_content'],
+      ['data', 'reasoning'], ['result', 'think'], ['result', 'reasoning_content'],
     ]
     let content = ''
-    let reasoning = ''
+    let hiddenThinking = ''
     for (const p of contentPaths) {
       const val = this.pickString(payload, p)
       if (val) content += val
     }
-    for (const p of reasoningPaths) {
+    for (const p of hiddenThinkingPaths) {
       const val = this.pickString(payload, p)
-      if (val) reasoning += val
+      if (val) hiddenThinking += val
     }
     const marker = typeof payload?.status === 'string' ? payload.status.toLowerCase() : ''
     const done = payload?.done === true || !!payload?.finish_reason || ['finish', 'finished', 'done', 'close', 'complete'].includes(marker)
-    return { content, reasoning, done }
+    return { content, hiddenThinking, done }
   }
 
-  private logSseEventSummary(event: any, index: number, parseOk: boolean, parsed: any, contentHit: boolean, reasoningHit: boolean, doneHit: boolean): void {
+  private logSseEventSummary(event: any, index: number, parseOk: boolean, parsed: any, contentHit: boolean, hiddenThinkingHit: boolean, doneHit: boolean): void {
     if (!this.sseDebugEnabled || index > this.sseDebugMaxEvents) return
     const topKeys = this.isObject(parsed) ? Object.keys(parsed) : []
     const nestedKeys: Record<string, string[]> = {}
@@ -735,7 +736,7 @@ export class GLMStreamHandler {
       nested_keys_depth2: nestedKeys,
       string_lengths: stringLengths,
       has_content: contentHit,
-      has_reasoning: reasoningHit,
+      has_hidden_thinking: hiddenThinkingHit,
       has_done_marker: doneHit || event.data === '[DONE]' || ['finish', 'done', 'close', 'complete'].includes((event.event || '').toLowerCase()),
     }))
   }
@@ -744,7 +745,7 @@ export class GLMStreamHandler {
     const transStream = new PassThrough()
     const cachedParts: any[] = []
     let sentContent = ''
-    let sentReasoning = ''
+    let hiddenThinkingLen = 0
     let sentRole = false
 
     transStream.write(
@@ -752,7 +753,7 @@ export class GLMStreamHandler {
         id: '',
         model: this.model,
         object: 'chat.completion.chunk',
-        choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
+        choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
         created: this.created,
       })}\n\n`
     )
@@ -769,7 +770,8 @@ export class GLMStreamHandler {
             } catch {}
           }
           const generic = this.extractCommonFields(result)
-          this.logSseEventSummary(event, cachedParts.length + 1, parseOk, result, !!generic.content, !!generic.reasoning, generic.done)
+          this.logSseEventSummary(event, cachedParts.length + 1, parseOk, result, !!generic.content, !!generic.hiddenThinking, generic.done)
+          if (generic.hiddenThinking) hiddenThinkingLen += generic.hiddenThinking.length
 
           if (!this.conversationId && result.conversation_id) {
             this.conversationId = result.conversation_id
@@ -805,7 +807,7 @@ export class GLMStreamHandler {
             const keyToIdMap = new Map<string, number>()
             let counter = 1
             let fullText = ''
-            let fullReasoning = ''
+            let fullHiddenThinking = ''
 
             cachedParts.forEach((part) => {
               const { content, meta_data } = part
@@ -846,31 +848,19 @@ export class GLMStreamHandler {
               })
 
               if (partText) fullText += (fullText.length > 0 ? '\n' : '') + partText
-              if (partReasoning) fullReasoning += (fullReasoning.length > 0 ? '\n' : '') + partReasoning
+              if (partReasoning) fullHiddenThinking += (fullHiddenThinking.length > 0 ? '\n' : '') + partReasoning
             })
 
-            const reasoningChunk = fullReasoning.substring(sentReasoning.length)
-            if (reasoningChunk) {
-              sentReasoning += reasoningChunk
-              transStream.write(
-                `data: ${JSON.stringify({
-                  id: this.conversationId,
-                  model: this.model,
-                  object: 'chat.completion.chunk',
-                  choices: [{ index: 0, delta: { reasoning_content: reasoningChunk }, finish_reason: null }],
-                  created: this.created,
-                })}\n\n`
-              )
-            }
+            if (fullHiddenThinking.length > hiddenThinkingLen) hiddenThinkingLen = fullHiddenThinking.length
 
             const chunk = fullText.substring(sentContent.length)
             if (chunk) {
               sentContent += chunk
             }
-            if (this.sseDebugEnabled && (chunk || reasoningChunk)) {
+            if (this.sseDebugEnabled && (chunk || fullHiddenThinking)) {
               console.log('[GLM SSE DEBUG] stream_accumulated', JSON.stringify({
                 visible_len: sentContent.length,
-                reasoning_len: sentReasoning.length,
+                hidden_thinking_len: hiddenThinkingLen,
                 chunks_seen: cachedParts.length,
                 completion_detected: false,
               }))
@@ -925,9 +915,11 @@ export class GLMStreamHandler {
             if (this.sseDebugEnabled) {
               console.log('[GLM SSE DEBUG] stream_final', JSON.stringify({
                 visible_len: sentContent.length,
-                reasoning_len: sentReasoning.length,
+                hidden_thinking_len: hiddenThinkingLen,
                 chunks_seen: cachedParts.length,
                 completion_detected: true,
+                returned_content_len: sentContent.length,
+                only_thinking_received: hiddenThinkingLen > 0 && sentContent.length === 0,
               }))
             }
             this.onEnd?.()
@@ -996,7 +988,7 @@ export class GLMStreamHandler {
     return new Promise((resolve, reject) => {
       const cachedParts: any[] = []
       let genericContent = ''
-      let genericReasoning = ''
+      let genericHiddenThinking = ''
       let completionDetected = false
       let eventCount = 0
 
@@ -1014,9 +1006,9 @@ export class GLMStreamHandler {
             }
             const generic = this.extractCommonFields(result)
             if (generic.content) genericContent += generic.content
-            if (generic.reasoning) genericReasoning += generic.reasoning
+            if (generic.hiddenThinking) genericHiddenThinking += generic.hiddenThinking
             completionDetected = completionDetected || generic.done || event.data === '[DONE]'
-            this.logSseEventSummary(event, eventCount, parseOk, result, !!generic.content, !!generic.reasoning, completionDetected)
+            this.logSseEventSummary(event, eventCount, parseOk, result, !!generic.content, !!generic.hiddenThinking, completionDetected)
 
             if (!this.conversationId && result.conversation_id) {
               this.conversationId = result.conversation_id
@@ -1054,7 +1046,7 @@ export class GLMStreamHandler {
               const keyToIdMap = new Map<string, number>()
               let counter = 1
               let fullText = ''
-              let fullReasoning = ''
+              let fullHiddenThinking = ''
 
               cachedParts.forEach((part) => {
                 const { content, meta_data } = part
@@ -1095,20 +1087,26 @@ export class GLMStreamHandler {
                 })
 
                 if (partText) fullText += (fullText.length > 0 ? '\n' : '') + partText
-                if (partReasoning) fullReasoning += (fullReasoning.length > 0 ? '\n' : '') + partReasoning
+                if (partReasoning) fullHiddenThinking += (fullHiddenThinking.length > 0 ? '\n' : '') + partReasoning
               })
 
               const { content: cleanContent, toolCalls } = parseToolCallsFromText(fullText, 'glm')
               const finalContent = cleanContent.trim() || genericContent.trim()
+              const hiddenThinkingLen = (fullHiddenThinking || genericHiddenThinking || '').length
               if (this.sseDebugEnabled) {
                 console.log('[GLM SSE DEBUG] non_stream_final', JSON.stringify({
                   visible_len: finalContent.length,
-                  reasoning_len: (fullReasoning || genericReasoning || '').length,
+                  hidden_thinking_len: hiddenThinkingLen,
                   chunks_seen: eventCount,
                   completion_detected: completionDetected,
+                  returned_content_len: finalContent.length,
+                  only_thinking_received: hiddenThinkingLen > 0 && finalContent.length === 0,
                 }))
               }
               if (!finalContent && toolCalls.length === 0) {
+                if (hiddenThinkingLen > 0) {
+                  return reject(new Error('GLM returned only thinking content and no visible answer.'))
+                }
                 return reject(new Error('GLM returned no visible content. Enable CHAT2API_GLM_SSE_DEBUG=1 for safe SSE structure diagnostics.'))
               }
 
@@ -1122,7 +1120,6 @@ export class GLMStreamHandler {
                     message: {
                       role: 'assistant',
                       content: toolCalls.length > 0 ? null : finalContent,
-                      reasoning_content: fullReasoning || genericReasoning || null,
                       ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
                     },
                     finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
@@ -1141,20 +1138,7 @@ export class GLMStreamHandler {
       stream.on('data', (buffer: Buffer) => parser.feed(buffer.toString()))
       stream.once('error', reject)
       stream.once('close', () => {
-        resolve({
-          id: this.conversationId,
-          model: this.model,
-          object: 'chat.completion',
-          choices: [
-            {
-              index: 0,
-              message: { role: 'assistant', content: '', reasoning_content: null },
-              finish_reason: 'stop',
-            },
-          ],
-          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          created: Math.floor(Date.now() / 1000),
-        })
+        reject(new Error('GLM stream closed before a visible answer was extracted.'))
       })
     })
   }

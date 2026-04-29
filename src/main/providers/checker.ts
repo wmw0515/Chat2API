@@ -321,23 +321,40 @@ export class ProviderChecker {
       if (response.status === 500) return { valid: false, error: 'Validation failed: missing Bigmodel-Organization or Bigmodel-Project' }
       if (response.status !== 200 || !contentType.includes('text/event-stream')) return { valid: false, error: `Validation failed: HTTP ${response.status}` }
       const stream = response.data
-      const hasChunk = await new Promise<boolean>((resolve) => {
+      const hasVisibleContent = await new Promise<boolean>((resolve) => {
         let settled = false
+        let buffer = ''
+        let hiddenThinkingSeen = false
+        const contentPatterns = [
+          '"content":"',
+          '"text":"',
+          '"answer":"',
+          '"output":"',
+          '"delta":"',
+          '"message":{"content":"',
+          '"delta":{"content":"',
+        ]
+        const hiddenThinkingPatterns = ['"think":"', '"reasoning_content":"', '"reasoning":"', '"thought":"', '"thinking":"']
         const done = (value: boolean) => {
           if (settled) return
           settled = true
           resolve(value)
         }
-        stream.once('data', (chunk: Buffer | string) => {
+        stream.on('data', (chunk: Buffer | string) => {
           const text = chunk.toString()
           if (/unauthorized|forbidden|token/i.test(text)) return done(false)
-          done(text.trim().length > 0)
+          buffer += text
+          if (hiddenThinkingPatterns.some((p) => buffer.includes(p))) hiddenThinkingSeen = true
+          if (contentPatterns.some((p) => buffer.includes(p))) return done(true)
         })
         stream.once('end', () => done(false))
         stream.once('error', () => done(false))
-        setTimeout(() => done(false), 5000)
+        setTimeout(() => done(false), 8000)
+        stream.once('close', () => {
+          if (hiddenThinkingSeen) done(false)
+        })
       })
-      if (!hasChunk) return { valid: false, error: 'Validation failed: no SSE data received from BigModel endpoint' }
+      if (!hasVisibleContent) return { valid: false, error: 'GLM produced thinking chunks but no visible content was extracted.' }
       return { valid: true, userInfo: { name: 'GLM User' } }
     } catch (error) {
       return { valid: false, error: error instanceof AxiosError ? error.message : 'Connection failed' }
