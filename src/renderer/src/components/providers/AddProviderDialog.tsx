@@ -234,10 +234,9 @@ export function AddProviderDialog({
       apiEndpoint: 'https://bigmodel.cn/api',
       enabled: true,
       description: 'GLM BigModel trial center (domestic), supports GLM-5.1',
-      supportedModels: ['GLM-5.1', 'GLM-5'],
+      supportedModels: ['GLM-5.1'],
       modelMappings: {
         'GLM-5.1': 'glm-5.1',
-        'GLM-5': 'glm-5.1',
       },
       headers: {
         'Content-Type': 'application/json',

@@ -34,11 +34,9 @@ export const glmConfig: BuiltinProviderConfig = {
   description: 'GLM BigModel trial center (domestic), supports GLM-5.1',
   supportedModels: [
     'GLM-5.1',
-    'GLM-5',
   ],
   modelMappings: {
     'GLM-5.1': 'glm-5.1',
-    'GLM-5': 'glm-5.1',
   },
   credentialFields: [
     {
