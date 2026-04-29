@@ -40,6 +40,22 @@ const GLM_TRIAL_WEB_SEARCH_TOOL = {
   extraMcpData: [],
 }
 
+type GlmRuntimeModelConfig = {
+  actualModel: string
+  modelId: number
+  endpointPath: string
+  refererModelCode: string
+}
+
+const GLM_RUNTIME_MODEL_CONFIGS: Record<string, GlmRuntimeModelConfig> = {
+  'glm-5.1': {
+    actualModel: 'glm-5.1',
+    modelId: 11989,
+    endpointPath: '/biz/trial/response/v4/sse/11989',
+    refererModelCode: 'glm-5.1',
+  },
+}
+
 const FAKE_HEADERS = {
   Accept: 'text/event-stream',
   'Accept-Encoding': 'gzip, deflate, br, zstd',
@@ -151,6 +167,22 @@ export class GLMAdapter {
     if (!cookie) return undefined
     const sanitized = cookie.replace(/[\r\n]/g, '').trim()
     return sanitized || undefined
+  }
+
+  private resolveRuntimeModelConfig(request: ChatCompletionRequest): GlmRuntimeModelConfig {
+    const displayModel = (request.originalModel || request.model || '').trim()
+    const candidateModels = [request.model, request.originalModel, displayModel]
+      .map(v => (v || '').trim().toLowerCase())
+      .filter(Boolean)
+
+    for (const candidate of candidateModels) {
+      const resolved = GLM_RUNTIME_MODEL_CONFIGS[candidate]
+      if (resolved) return resolved
+    }
+
+    throw new Error(
+      `GLM model "${displayModel || request.model}" is not configured with a BigModel SSE endpoint/modelId. Configure this model explicitly instead of aliasing it to GLM-5.1 by default.`,
+    )
   }
 
   private async acquireToken(): Promise<string> {
@@ -515,9 +547,10 @@ GLM STRICT RULES:
 
     console.log('[GLM] Sending chat request...')
     
+    const runtimeModelConfig = this.resolveRuntimeModelConfig(request)
     const runtimeBody = {
-      model: 'glm-5.1',
-      modelId: 11989,
+      model: runtimeModelConfig.actualModel,
+      modelId: runtimeModelConfig.modelId,
       stream: true,
       thinking: { type: 'enabled' },
       max_tokens: 65536,
@@ -530,19 +563,21 @@ GLM STRICT RULES:
     if (process.env.CHAT2API_GLM_SSE_DEBUG === '1') {
       const lastUser = [...promptMessages].reverse().find((p: any) => p.role === 'user')
       console.log('[GLM SSE DEBUG] Request body summary:', JSON.stringify({
+        display_model_requested: request.originalModel || request.model,
+        actual_model_used: runtimeBody.model,
+        endpoint_path_used: runtimeModelConfig.endpointPath,
         has_tools: Array.isArray(runtimeBody.tools) && runtimeBody.tools.length > 0,
         tools_length: Array.isArray(runtimeBody.tools) ? runtimeBody.tools.length : 0,
         has_thinking: Boolean(runtimeBody.thinking),
         prompt_length: Array.isArray(runtimeBody.prompt) ? runtimeBody.prompt.length : 0,
         last_user_text_length: typeof lastUser?.content === 'string' ? lastUser.content.length : 0,
-        model: runtimeBody.model,
         modelId: runtimeBody.modelId,
         stream: runtimeBody.stream,
       }))
     }
 
     const response = await axios.post(
-      `${GLM_API_BASE}/biz/trial/response/v4/sse/11989`,
+      `${GLM_API_BASE}${runtimeModelConfig.endpointPath}`,
       runtimeBody,
       {
         headers: {
@@ -550,7 +585,7 @@ GLM STRICT RULES:
           'Bigmodel-Organization': bigmodelOrganization,
           'Bigmodel-Project': bigmodelProject,
           Origin: 'https://bigmodel.cn',
-          Referer: 'https://bigmodel.cn/trialcenter/modeltrial/text?modelCode=glm-5.1',
+          Referer: `https://bigmodel.cn/trialcenter/modeltrial/text?modelCode=${runtimeModelConfig.refererModelCode}`,
           Accept: 'text/event-stream',
           'Content-Type': 'application/json',
           'Set-Language': 'zh',
@@ -785,7 +820,7 @@ export class GLMStreamHandler {
     }))
   }
 
-  async handleStream(stream: any): Promise<PassThrough> {
+  async handleStream(stream: any, response?: AxiosResponse): Promise<PassThrough> {
     const transStream = new PassThrough()
     const cachedParts: any[] = []
     let sentContent = ''
@@ -794,6 +829,9 @@ export class GLMStreamHandler {
     let eventCount = 0
     let completionDetected = false
     let terminated = false
+    const startedAt = Date.now()
+    const upstreamStatus = response?.status
+    const upstreamContentType = response?.headers?.['content-type']
 
     transStream.write(
       `data: ${JSON.stringify({
@@ -949,7 +987,11 @@ export class GLMStreamHandler {
                 visible_content_len: sentContent.length,
                 visible_content_emitted: hasVisibleContent || this.toolCallState.hasEmittedToolCall,
                 completion_detected: true,
-                decision: isThinkingOnly ? 'error_only_thinking_no_visible_content' : 'success_with_visible_content',
+                final_decision: isThinkingOnly ? 'error_only_thinking_no_visible_content' : 'success_with_visible_content',
+                stream_closed: false,
+                upstream_status: upstreamStatus,
+                upstream_content_type: upstreamContentType,
+                elapsed_ms: Date.now() - startedAt,
               }))
             }
 
@@ -1003,7 +1045,11 @@ export class GLMStreamHandler {
           visible_content_len: sentContent.length,
           visible_content_emitted: sentContent.trim().length > 0 || this.toolCallState.hasEmittedToolCall,
           completion_detected: completionDetected,
-          decision: 'upstream_error',
+          final_decision: 'upstream_error',
+          stream_closed: false,
+          upstream_status: upstreamStatus,
+          upstream_content_type: upstreamContentType,
+          elapsed_ms: Date.now() - startedAt,
         }))
       }
       if (!terminated) transStream.end()
@@ -1023,7 +1069,15 @@ export class GLMStreamHandler {
             visible_content_len: sentContent.length,
             visible_content_emitted: hasVisibleContent,
             completion_detected: completionDetected,
-            decision: hasVisibleContent ? 'success_with_visible_content' : (hiddenThinkingLen > 0 ? 'error_only_thinking_no_visible_content' : 'timeout'),
+            final_decision: hasVisibleContent
+              ? 'success_with_visible_content'
+              : (eventCount === 0
+                  ? 'error_no_sse_chunks'
+                  : (hiddenThinkingLen > 0 ? 'error_only_thinking_no_visible_content' : 'upstream_closed_without_visible_content')),
+            stream_closed: true,
+            upstream_status: upstreamStatus,
+            upstream_content_type: upstreamContentType,
+            elapsed_ms: Date.now() - startedAt,
           }))
         }
         if (!hasVisibleContent) {
@@ -1054,13 +1108,16 @@ export class GLMStreamHandler {
     return transStream
   }
 
-  async handleNonStream(stream: any): Promise<any> {
+  async handleNonStream(stream: any, response?: AxiosResponse): Promise<any> {
     return new Promise((resolve, reject) => {
       const cachedParts: any[] = []
       let genericContent = ''
       let genericHiddenThinking = ''
       let completionDetected = false
       let eventCount = 0
+      const startedAt = Date.now()
+      const upstreamStatus = response?.status
+      const upstreamContentType = response?.headers?.['content-type']
 
       const parser = createParser({
         onEvent: (event: any) => {
@@ -1170,14 +1227,22 @@ export class GLMStreamHandler {
                   visible_content_len: finalContent.length,
                   visible_content_emitted: finalContent.length > 0 || toolCalls.length > 0,
                   completion_detected: completionDetected,
-                  decision: finalContent.length > 0 || toolCalls.length > 0 ? 'success_with_visible_content' : (hiddenThinkingLen > 0 ? 'error_only_thinking_no_visible_content' : 'upstream_error'),
+                  final_decision: finalContent.length > 0 || toolCalls.length > 0
+                    ? 'success_with_visible_content'
+                    : (eventCount === 0
+                        ? 'error_no_sse_chunks'
+                        : (hiddenThinkingLen > 0 ? 'error_only_thinking_no_visible_content' : 'upstream_closed_without_visible_content')),
+                  stream_closed: false,
+                  upstream_status: upstreamStatus,
+                  upstream_content_type: upstreamContentType,
+                  elapsed_ms: Date.now() - startedAt,
                 }))
               }
               if (!finalContent && toolCalls.length === 0) {
                 if (hiddenThinkingLen > 0) {
-                  return reject(new Error('GLM returned thinking chunks but no visible answer was extracted.'))
+                    return reject(new Error('GLM upstream stream closed before visible content was extracted.'))
                 }
-                return reject(new Error('GLM returned no visible content. Enable CHAT2API_GLM_SSE_DEBUG=1 for safe SSE structure diagnostics.'))
+                return reject(new Error('GLM upstream stream closed before visible content was extracted.'))
               }
 
               resolve({
@@ -1208,7 +1273,7 @@ export class GLMStreamHandler {
       stream.on('data', (buffer: Buffer) => parser.feed(buffer.toString()))
       stream.once('error', reject)
       stream.once('close', () => {
-        reject(new Error('GLM stream closed before a visible answer was extracted.'))
+        reject(new Error('GLM upstream stream closed before visible content was extracted.'))
       })
     })
   }
