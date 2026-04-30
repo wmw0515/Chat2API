@@ -7,6 +7,7 @@ import { URL } from 'node:url'
 const DEFAULT_TIMEOUT_MS = 30000
 const STREAM_TIMEOUT_MS = 45000
 const DONE_MARKERS = ['[done]', 'event: done', '"done":true', '"finish_reason":"stop"']
+const SSE_DEBUG_MAX_EVENTS = 20
 
 function printUsage() {
   console.log('Usage: node scripts/provider-probe.mjs <probe-input.json> [--show-prompt]')
@@ -18,6 +19,7 @@ const toLength = (v) => (v === null || v === undefined ? 0 : String(v).length)
 
 function tryParseJson(text) { try { return JSON.parse(text) } catch { return null } }
 function normalizeHeaderKey(k) { return String(k).toLowerCase() }
+function truncateText(text, max = 300) { return text.length > max ? `${text.slice(0, max)}...` : text }
 
 function sanitizeCookie(raw) {
   if (typeof raw !== 'string') return { present: false, valid: true, length: 0 }
@@ -165,14 +167,61 @@ async function runHttpRequest(req) {
     }
     const streamController = new AbortController(); const st = setTimeout(() => streamController.abort(), STREAM_TIMEOUT_MS)
     const reader = response.body?.getReader(); const decoder = new TextDecoder(); let chunks = 0; let total = 0; let completion = false; const ev = []
+    const sseDebugEvents = []
+    let sseBuffer = ''
+    let currentEventName = ''
+    let currentDataLines = []
+    const flushSseEvent = () => {
+      if (!currentEventName && !currentDataLines.length) return
+      const rawData = currentDataLines.join('\n')
+      let parsedKeys = null
+      let parsedPreview = null
+      const parsed = tryParseJson(rawData)
+      if (isObject(parsed) || Array.isArray(parsed)) {
+        parsedKeys = Array.isArray(parsed) ? ['<array>'] : Object.keys(parsed)
+        parsedPreview = truncateText(JSON.stringify(parsed))
+      }
+      if (sseDebugEvents.length < SSE_DEBUG_MAX_EVENTS) {
+        sseDebugEvents.push({ index: sseDebugEvents.length + 1, event: currentEventName || '<none>', raw_data: rawData, parsed_keys: parsedKeys, parsed_preview: parsedPreview })
+      }
+      currentEventName = ''
+      currentDataLines = []
+    }
     while (reader) {
       const { done, value } = await reader.read(); if (done) break
       const txt = decoder.decode(value, { stream: true }); chunks += 1; total += txt.length
       const match = txt.match(/event:\s*([^\n\r]+)/i); if (match && ev.length < 5) ev.push(match[1].trim())
+      sseBuffer += txt
+      while (true) {
+        const boundary = sseBuffer.indexOf('\n\n')
+        if (boundary === -1) break
+        const rawEvent = sseBuffer.slice(0, boundary)
+        sseBuffer = sseBuffer.slice(boundary + 2)
+        const normalized = rawEvent.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        const lines = normalized.split('\n')
+        currentEventName = ''
+        currentDataLines = []
+        for (const line of lines) {
+          if (line.startsWith('event:')) currentEventName = line.slice('event:'.length).trim()
+          else if (line.startsWith('data:')) currentDataLines.push(line.slice('data:'.length).trimStart())
+        }
+        flushSseEvent()
+      }
       if (DONE_MARKERS.some((m) => txt.toLowerCase().includes(m))) { completion = true; break }
     }
+    if (sseBuffer.trim()) {
+      const normalized = sseBuffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+      const lines = normalized.split('\n')
+      currentEventName = ''
+      currentDataLines = []
+      for (const line of lines) {
+        if (line.startsWith('event:')) currentEventName = line.slice('event:'.length).trim()
+        else if (line.startsWith('data:')) currentDataLines.push(line.slice('data:'.length).trimStart())
+      }
+      flushSseEvent()
+    }
     clearTimeout(st)
-    return { status: response.status, contentType, responseLength: total, topLevelKeys: [], hasChatId: false, hasMsgId: false, is_event_stream: true, chunks_seen: chunks, first_event_names: ev, completion_detected: completion }
+    return { status: response.status, contentType, responseLength: total, topLevelKeys: [], hasChatId: false, hasMsgId: false, is_event_stream: true, chunks_seen: chunks, first_event_names: ev, completion_detected: completion, sse_event_debug: sseDebugEvents }
   } catch (e) {
     return { status: null, contentType: null, responseLength: 0, topLevelKeys: [], hasChatId: false, hasMsgId: false, transportError: e instanceof Error ? e.message : String(e), is_event_stream: false }
   } finally { clearTimeout(timeout) }
@@ -219,6 +268,19 @@ async function main() {
     const res = await runHttpRequest({ method, url: mutated.urlObj.toString(), headers: hv.validHeaders, body: mutated.body })
     const item = { name: v.name, skipped: false, headerDiagnostics: hv.skipped, ...res }
     results.push(item); console.log(JSON.stringify(item, null, 2))
+    if (Array.isArray(item.sse_event_debug) && item.sse_event_debug.length) {
+      console.log('=== SSE EVENT DEBUG ===')
+      for (const evt of item.sse_event_debug) {
+        console.log(`[SSE EVENT ${evt.index}]`)
+        console.log(`event: ${evt.event}`)
+        console.log(`raw_data: ${evt.raw_data}`)
+        if (Array.isArray(evt.parsed_keys)) {
+          console.log(`parsed_keys: ${JSON.stringify(evt.parsed_keys)}`)
+          console.log(`parsed_preview: ${evt.parsed_preview}`)
+        }
+        console.log('')
+      }
+    }
   }
 
   console.log('Summary:')
